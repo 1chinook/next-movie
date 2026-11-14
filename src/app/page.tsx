@@ -111,14 +111,14 @@ export default function Home() {
       const candidates = buildCandidates(a, b, depth);
       const lookups = new Map<string, FilmLookup>();
       for (const f of [...pickProfileFilms(a, depth), ...pickProfileFilms(b, depth), ...candidates.map((c) => c.ref)]) {
-        if (!lookups.has(f.key) && (f.slug || f.uri)) lookups.set(f.key, { key: f.key, name: f.name, year: f.year, slug: f.slug, uri: f.uri });
+        if (!lookups.has(f.key) && f.name) lookups.set(f.key, { key: f.key, name: f.name, year: f.year, slug: f.slug, uri: f.uri });
       }
       const todo = [...lookups.values()];
 
       const metas = new Map<string, FilmMeta>();
       let warning: string | undefined;
       for (let i = 0; i < todo.length; i += BATCH) {
-        setStep(`Film detayları Letterboxd'dan çekiliyor… (${Math.min(i + BATCH, todo.length)}/${todo.length})`);
+        setStep(`Film detayları çekiliyor… (${Math.min(i + BATCH, todo.length)}/${todo.length})`);
         const res = await fetch("/api/films", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

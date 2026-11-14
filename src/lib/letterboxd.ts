@@ -2,6 +2,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { decodeEntities, filmKey, splitNameYear } from "./keys";
+import { fetchTmdbFilmMeta, hasTmdbConfig } from "./tmdb";
 import type { FilmLookup, FilmMeta, FilmRef } from "./types";
 
 const BASE = "https://letterboxd.com";
@@ -183,6 +184,20 @@ function parseFilmPage(html: string, finalUrl: string, lookup: FilmLookup): Film
 
 export async function getFilmMeta(lookup: FilmLookup): Promise<FilmMeta | null> {
   const c = await cache();
+
+  if (hasTmdbConfig()) {
+    const tmdbKey = `tmdb:${lookup.key}`;
+    const hit = c.get(tmdbKey);
+    if (hit) return { ...hit, key: lookup.key };
+
+    const meta = await fetchTmdbFilmMeta(lookup);
+    if (meta) {
+      c.set(tmdbKey, meta);
+      scheduleWrite();
+    }
+    return meta;
+  }
+
   const cacheKey = lookup.slug ? `slug:${lookup.slug}` : lookup.uri ? `uri:${lookup.uri}` : null;
   if (!cacheKey) return null;
   const hit = c.get(cacheKey);
