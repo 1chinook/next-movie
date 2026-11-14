@@ -1,69 +1,234 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useState } from "react";
+import { PersonInput, emptyPerson, type PersonInputState } from "@/components/PersonInput";
+import { CompatibilitySection, ProfileCard, Recommendations, type AiResult } from "@/components/Results";
+import {
+  buildCandidates,
+  buildProfile,
+  compare,
+  pickProfileFilms,
+  profileSummary,
+  recommend,
+  type Compatibility,
+  type Depth,
+  type Profile,
+  type Recommendation,
+} from "@/lib/analysis";
+import { importLetterboxdFiles } from "@/lib/exportImport";
+import type { FilmLookup, FilmMeta, UserData } from "@/lib/types";
+
+interface Result {
+  users: [UserData, UserData];
+  profiles: [Profile, Profile];
+  compat: Compatibility;
+  recs: Recommendation[];
+  warning?: string;
+}
+
+async function loadUser(p: PersonInputState): Promise<UserData> {
+  const label = p.label.trim() || "?";
+  if (p.mode === "export") {
+    if (!p.files.length) throw new Error(`${label}: export dosyası seçilmedi.`);
+    return importLetterboxdFiles(p.files, label);
+  }
+  if (!p.username.trim()) throw new Error(`${label}: kullanıcı adı girilmedi.`);
+  const res = await fetch(`/api/user?username=${encodeURIComponent(p.username)}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(`${label}: ${data.error}`);
+  return { label, source: "username", watched: data.watched, watchlist: data.watchlist };
+}
+
+const BATCH = 20;
 
 export default function Home() {
+  const [people, setPeople] = useState<[PersonInputState, PersonInputState]>([emptyPerson("Ben"), emptyPerson("Sen")]);
+  const [depth, setDepth] = useState<Depth>("normal");
+  const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState("");
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<Result | null>(null);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [ai, setAi] = useState<AiResult | null>(null);
+  const [aiState, setAiState] = useState<"idle" | "loading" | "error">("idle");
+
+  useEffect(() => {
+    fetch("/api/explain")
+      .then((r) => r.json())
+      .then((d) => setAiEnabled(Boolean(d.enabled)))
+      .catch(() => {});
+  }, []);
+
+  async function askAi(r: Result) {
+    setAiState("loading");
+    try {
+      const top = r.recs.slice(0, 6);
+      const res = await fetch("/api/explain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          names: [r.profiles[0].label, r.profiles[1].label],
+          profiles: [profileSummary(r.profiles[0]), profileSummary(r.profiles[1])],
+          compatibility: `Uyum skoru %${r.compat.score}, ortak izlenen ${r.compat.commonWatched} film, puan korelasyonu ${r.compat.correlation?.toFixed(2) ?? "bilinmiyor"}. Ortak sevilenler: ${r.compat.sharedLoves
+            .slice(0, 6)
+            .map((s) => s.name)
+            .join(", ")}.`,
+          films: top.map((x) => ({
+            key: x.meta.key,
+            name: x.meta.name,
+            year: x.meta.year,
+            directors: x.meta.directors,
+            genres: x.meta.genres,
+            reasons: x.reasons,
+            warnings: x.warnings,
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setAi(data);
+      setAiState("idle");
+    } catch (e) {
+      console.error(e);
+      setAiState("error");
+    }
+  }
+
+  async function run() {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    setAi(null);
+    setAiState("idle");
+    setProgress(0);
+    try {
+      setStep("Letterboxd verileri okunuyor…");
+      const [a, b] = await Promise.all(people.map(loadUser));
+      if (a.label === b.label) b.label = `${b.label} (2)`;
+
+      // Detayı çekilecek filmler
+      const candidates = buildCandidates(a, b, depth);
+      const lookups = new Map<string, FilmLookup>();
+      for (const f of [...pickProfileFilms(a, depth), ...pickProfileFilms(b, depth), ...candidates.map((c) => c.ref)]) {
+        if (!lookups.has(f.key) && (f.slug || f.uri)) lookups.set(f.key, { key: f.key, name: f.name, year: f.year, slug: f.slug, uri: f.uri });
+      }
+      const todo = [...lookups.values()];
+
+      const metas = new Map<string, FilmMeta>();
+      let warning: string | undefined;
+      for (let i = 0; i < todo.length; i += BATCH) {
+        setStep(`Film detayları Letterboxd'dan çekiliyor… (${Math.min(i + BATCH, todo.length)}/${todo.length})`);
+        const res = await fetch("/api/films", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ films: todo.slice(i, i + BATCH) }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (metas.size < 20) throw new Error(data.error);
+          warning = `${data.error} Analiz şimdiye kadar çekilen ${metas.size} filmle yapıldı.`;
+          break;
+        }
+        for (const m of data.films as FilmMeta[]) metas.set(m.key, m);
+        setProgress((i + BATCH) / todo.length);
+      }
+
+      setStep("Zevk profilleri çıkarılıyor…");
+      const pa = buildProfile(a, metas);
+      const pb = buildProfile(b, metas);
+      const compat = compare(a, b, pa, pb);
+      const recs = recommend(candidates, metas, pa, pb);
+      const r: Result = { users: [a, b], profiles: [pa, pb], compat, recs, warning };
+      setResult(r);
+      if (aiEnabled && recs.length) askAi(r);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      setStep("");
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-10">
+      <header className="flex flex-col gap-2 text-center">
+        <div className="flex justify-center gap-1.5">
+          <span className="h-4 w-4 rounded-full bg-lborange" />
+          <span className="h-4 w-4 rounded-full bg-lbgreen" />
+          <span className="h-4 w-4 rounded-full bg-lbblue" />
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+        <h1 className="text-4xl font-black tracking-tight text-white sm:text-5xl">Next Movie</h1>
+        <p className="text-muted">İkinizin Letterboxd geçmişini analiz eder, birlikte izleyeceğiniz sıradaki filmi bulur.</p>
+      </header>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <PersonInput value={people[0]} onChange={(v) => setPeople([v, people[1]])} accent="orange" disabled={busy} />
+        <PersonInput value={people[1]} onChange={(v) => setPeople([people[0], v])} accent="blue" disabled={busy} />
+      </div>
+
+      <div className="flex flex-col items-center gap-3">
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-muted">Analiz derinliği:</span>
+          {(
+            [
+              ["fast", "Hızlı"],
+              ["normal", "Normal"],
+              ["deep", "Derin"],
+            ] as const
+          ).map(([d, l]) => (
+            <button
+              key={d}
+              disabled={busy}
+              onClick={() => setDepth(d)}
+              className={`rounded-full border px-3 py-1 ${depth === d ? "border-lbgreen text-lbgreen" : "border-line text-muted hover:text-foreground"}`}
+            >
+              {l}
+            </button>
+          ))}
         </div>
-      </main>
-    </div>
+        <button
+          onClick={run}
+          disabled={busy}
+          className="rounded-xl bg-lbgreen px-8 py-3 text-lg font-bold text-black shadow-lg shadow-lbgreen/20 transition hover:brightness-110 disabled:opacity-60"
+        >
+          {busy ? "Analiz ediliyor…" : "Analiz et ve film öner"}
+        </button>
+        {busy && (
+          <div className="w-full max-w-md">
+            <div className="h-2 overflow-hidden rounded-full bg-panel-2">
+              <div className="h-2 rounded-full bg-lbgreen transition-all" style={{ width: `${Math.max(4, Math.min(100, progress * 100))}%` }} />
+            </div>
+            <p className="mt-2 text-center text-sm text-muted">{step}</p>
+            <p className="text-center text-xs text-muted">İlk analiz biraz sürebilir; film detayları önbelleğe alınır, sonrakiler hızlıdır.</p>
+          </div>
+        )}
+        {error && <p className="max-w-xl rounded-lg border border-lborange/50 bg-lborange/10 px-4 py-2 text-center text-sm text-lborange">{error}</p>}
+      </div>
+
+      {result && (
+        <>
+          {result.warning && <p className="rounded-lg border border-lborange/50 bg-lborange/10 px-4 py-2 text-sm text-lborange">{result.warning}</p>}
+          <Recommendations
+            recs={result.recs}
+            a={result.profiles[0].label}
+            b={result.profiles[1].label}
+            ai={ai}
+            aiState={aiState}
+            aiEnabled={aiEnabled}
+            onAskAi={() => askAi(result)}
+          />
+          <CompatibilitySection c={result.compat} a={result.profiles[0]} b={result.profiles[1]} />
+          <div className="grid gap-4 md:grid-cols-2">
+            <ProfileCard p={result.profiles[0]} accent="orange" />
+            <ProfileCard p={result.profiles[1]} accent="blue" />
+          </div>
+        </>
+      )}
+
+      <footer className="mt-auto pt-8 text-center text-xs text-muted">
+        Veriler Letterboxd&apos;dan gelir; bu uygulama Letterboxd ile bağlantılı değildir.
+      </footer>
+    </main>
   );
 }

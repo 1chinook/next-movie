@@ -1,36 +1,27 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Next Movie 🍿
 
-## Getting Started
+İki kişinin Letterboxd verilerini analiz edip **birlikte izlenecek sıradaki filmi** öneren Next.js uygulaması.
 
-First, run the development server:
+## Özellikler
+- **Veri girişi:** Letterboxd export ZIP/CSV'si veya herkese açık kullanıcı adı
+- **Zevk profili:** Puanlar kişinin kendi ortalamasına göre normalize edilerek tür, yönetmen, oyuncu, dönem ve ülke tercihleri çıkarılır
+- **Uyum analizi:** Uyum skoru, puan korelasyonu, tür karşılaştırması, ortak favoriler, çatışma noktaları
+- **Öneri:** İkinizin de izlemediği, izleme listelerinizdeki filmler; ortak watchlist önceliklidir, sadece birine hitap eden filmler cezalandırılır
+- **Gemini (opsiyonel):** Kişiselleştirilmiş öneri gerekçeleri ve "bu gecenin seçimi"
 
+Film detayları (tür, yönetmen, oyuncu…) Letterboxd film sayfalarındaki JSON-LD'den alınır ve `.cache/films.json` içinde önbelleklenir.
+
+## Kurulum
 ```bash
+npm install
+cp .env.example .env.local   # Gemini kullanacaksan GEMINI_API_KEY ekle
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
+http://localhost:3000
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Export nasıl alınır?
+Letterboxd → Settings → Data → **Export your data**. İnen ZIP'i olduğu gibi yükle.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+> Not: Letterboxd zaman zaman otomatik istekleri bot doğrulamasıyla engelleyebilir. Uygulama bunu aşmaya çalışmaz; böyle durumda bir süre bekleyip tekrar deneyin.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Bu proje Letterboxd ile bağlantılı değildir.
