@@ -32,8 +32,9 @@ interface Result {
 async function loadUser(p: PersonInputState): Promise<UserData> {
   const label = p.label.trim() || "?";
   if (p.mode === "export") {
-    if (!p.files.length) throw new Error(`${label}: export dosyası seçilmedi.`);
-    return importLetterboxdFiles(p.files, label);
+    if (p.files.length) return importLetterboxdFiles(p.files, label);
+    if (p.savedData) return { ...p.savedData, label };
+    throw new Error(`${label}: export dosyası seçilmedi.`);
   }
   if (!p.username.trim()) throw new Error(`${label}: kullanıcı adı girilmedi.`);
   const res = await fetch(`/api/user?username=${encodeURIComponent(p.username)}`);
@@ -43,6 +44,7 @@ async function loadUser(p: PersonInputState): Promise<UserData> {
 }
 
 const BATCH = 20;
+const STORAGE_KEY = "next-movie:saved-people-v1";
 
 export default function Home() {
   const [people, setPeople] = useState<[PersonInputState, PersonInputState]>([emptyPerson("Ben"), emptyPerson("Sen")]);
@@ -61,6 +63,18 @@ export default function Home() {
       .then((r) => r.json())
       .then((d) => setAiEnabled(Boolean(d.enabled)))
       .catch(() => {});
+
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as [UserData | null, UserData | null];
+      setPeople((prev) => [
+        saved[0] ? { ...prev[0], label: saved[0].label || prev[0].label, savedData: saved[0] } : prev[0],
+        saved[1] ? { ...prev[1], label: saved[1].label || prev[1].label, savedData: saved[1] } : prev[1],
+      ]);
+    } catch {
+      /* bozuk localStorage verisini yoksay */
+    }
   }, []);
 
   async function askAi(r: Result) {
@@ -109,6 +123,17 @@ export default function Home() {
       setStep("Letterboxd verileri okunuyor…");
       const [a, b] = await Promise.all(people.map(loadUser));
       if (a.label === b.label) b.label = `${b.label} (2)`;
+
+      // Bir sonraki açılışta tekrar ZIP seçmemek için tarayıcıda sakla
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify([a, b]));
+        setPeople((prev) => [
+          { ...prev[0], files: [], savedData: a },
+          { ...prev[1], files: [], savedData: b },
+        ]);
+      } catch {
+        /* localStorage kotası dolduysa sessizce geç */
+      }
 
       // Detayı çekilecek filmler
       const candidates = buildCandidates(a, b, depth);
@@ -191,8 +216,23 @@ export default function Home() {
       </header>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <PersonInput value={people[0]} onChange={(v) => setPeople([v, people[1]])} accent="orange" disabled={busy} />
-        <PersonInput value={people[1]} onChange={(v) => setPeople([people[0], v])} accent="blue" disabled={busy} />
+        {([0, 1] as const).map((idx) => (
+          <PersonInput
+            key={idx}
+            value={people[idx]}
+            onChange={(v) => {
+              const next: [PersonInputState, PersonInputState] = idx === 0 ? [v, people[1]] : [people[0], v];
+              setPeople(next);
+              if (!v.savedData) {
+                try {
+                  localStorage.setItem(STORAGE_KEY, JSON.stringify([next[0].savedData ?? null, next[1].savedData ?? null]));
+                } catch {}
+              }
+            }}
+            accent={idx === 0 ? "orange" : "blue"}
+            disabled={busy}
+          />
+        ))}
       </div>
 
       <div className="flex flex-col items-center gap-3">

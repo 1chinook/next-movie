@@ -1,10 +1,13 @@
 "use client";
 
+import type { UserData } from "@/lib/types";
+
 export interface PersonInputState {
   label: string;
   mode: "export" | "username";
   files: File[];
   username: string;
+  savedData?: UserData;
 }
 
 export const emptyPerson = (label: string): PersonInputState => ({ label, mode: "export", files: [], username: "" });
@@ -62,6 +65,14 @@ export function PersonInput({
             <span className="text-2xl">📦</span>
             {value.files.length ? (
               <span className="font-medium">{value.files.map((f) => f.name).join(", ")}</span>
+            ) : value.savedData ? (
+              <div className="flex flex-col items-center gap-1">
+                <span className="font-semibold text-lbgreen">✓ Kayıtlı veri hazır</span>
+                <span className="text-xs text-muted">
+                  {value.savedData.watched.length} izlenen · {value.savedData.watchlist.length} watchlist
+                </span>
+                <span className="text-[11px] text-muted">(Değiştirmek için yeni ZIP seçebilirsin)</span>
+              </div>
             ) : (
               <>
                 <span className="font-medium">Letterboxd export ZIP&apos;ini seç</span>
@@ -76,6 +87,16 @@ export function PersonInput({
               onChange={(e) => onChange({ ...value, files: [...(e.target.files ?? [])] })}
             />
           </label>
+          {value.savedData && !value.files.length && (
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => onChange({ ...value, savedData: undefined })}
+              className="self-end text-xs text-muted underline hover:text-lborange"
+            >
+              Kayıtlı veriyi temizle
+            </button>
+          )}
           <p className="text-xs text-muted">
             Letterboxd → Settings → Data → <b>Export your data</b>. En doğru sonuç bunla alınır (puanlar + beğeniler).
           </p>
