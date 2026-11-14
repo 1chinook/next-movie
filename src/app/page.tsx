@@ -68,10 +68,12 @@ export default function Home() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
       const saved = JSON.parse(raw) as [UserData | null, UserData | null];
-      setPeople((prev) => [
-        saved[0] ? { ...prev[0], label: saved[0].label || prev[0].label, savedData: saved[0] } : prev[0],
-        saved[1] ? { ...prev[1], label: saved[1].label || prev[1].label, savedData: saved[1] } : prev[1],
-      ]);
+      queueMicrotask(() => {
+        setPeople((prev) => [
+          saved[0] ? { ...prev[0], label: saved[0].label || prev[0].label, savedData: saved[0] } : prev[0],
+          saved[1] ? { ...prev[1], label: saved[1].label || prev[1].label, savedData: saved[1] } : prev[1],
+        ]);
+      });
     } catch {
       /* bozuk localStorage verisini yoksay */
     }
