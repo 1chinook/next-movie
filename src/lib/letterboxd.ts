@@ -2,7 +2,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { decodeEntities, filmKey, splitNameYear } from "./keys";
-import { fetchTmdbFilmMeta, hasTmdbConfig } from "./tmdb";
+import { collectDiscoveryIds, fetchTmdbFilmMeta, fetchTmdbMovieDetail, hasTmdbConfig, type DiscoverSeed, type SeedHitInfo } from "./tmdb";
 import type { FilmLookup, FilmMeta, FilmRef } from "./types";
 
 const BASE = "https://letterboxd.com";
@@ -188,7 +188,7 @@ export async function getFilmMeta(lookup: FilmLookup): Promise<FilmMeta | null> 
   if (hasTmdbConfig()) {
     const tmdbKey = `tmdb:${lookup.key}`;
     const hit = c.get(tmdbKey);
-    if (hit) return { ...hit, key: lookup.key };
+    if (hit && hit.tmdbId) return { ...hit, key: lookup.key };
 
     const meta = await fetchTmdbFilmMeta(lookup);
     if (meta) {
@@ -217,4 +217,45 @@ export async function getFilmMeta(lookup: FilmLookup): Promise<FilmMeta | null> 
     if (e instanceof BlockedError) throw e;
     return null;
   }
+}
+
+export async function discoverFilms(params: {
+  seeds: DiscoverSeed[];
+  genreIds: number[];
+  excludeKeys: string[];
+  excludeTmdbIds: number[];
+  limit?: number;
+}): Promise<{ films: FilmMeta[]; seedMap: Record<string, SeedHitInfo> }> {
+  if (!hasTmdbConfig()) return { films: [], seedMap: {} };
+
+  const c = await cache();
+  const candidates = await collectDiscoveryIds(
+    params.seeds,
+    params.genreIds,
+    new Set(params.excludeKeys),
+    new Set(params.excludeTmdbIds),
+  );
+
+  const picked = candidates.slice(0, params.limit ?? 30);
+  const seedMap: Record<string, SeedHitInfo> = {};
+
+  const films = await mapLimit(picked, 4, async (cand) => {
+    const tmdbKey = `tmdb:${cand.key}`;
+    const byIdKey = `tmdbid:${cand.tmdbId}`;
+    let meta = c.get(byIdKey) ?? c.get(tmdbKey);
+    if (!meta) {
+      try {
+        meta = await fetchTmdbMovieDetail(cand.tmdbId, { key: cand.key, name: cand.name, year: cand.year });
+        c.set(tmdbKey, meta);
+        c.set(byIdKey, meta);
+        scheduleWrite();
+      } catch {
+        return null;
+      }
+    }
+    seedMap[meta.key] = cand.info;
+    return meta;
+  });
+
+  return { films: films.filter((m): m is FilmMeta => Boolean(m)), seedMap };
 }

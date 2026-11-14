@@ -20,19 +20,23 @@ export interface UserData {
   watchlist: FilmRef[];
 }
 
-/** Letterboxd film sayfasından çekilen detaylar. */
+/** Letterboxd veya TMDB'den çekilen film detayları. */
 export interface FilmMeta {
   key: string;
   slug: string;
   name: string;
+  originalName?: string;
   year?: number;
+  tmdbId?: number;
+  genreIds?: number[];
   directors: string[];
   actors: string[];
   genres: string[];
   countries: string[];
   runtime?: number;
-  /** Letterboxd ortalaması (0-5) */
+  /** 0-5 ölçeğinde ortalama puan */
   avgRating?: number;
+  voteCount?: number;
   poster?: string;
   url: string;
   description?: string;

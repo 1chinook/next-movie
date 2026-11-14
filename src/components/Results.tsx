@@ -232,7 +232,7 @@ export function ProfileCard({ p, accent }: { p: Profile; accent: "orange" | "blu
           <div className="mb-2 text-xs uppercase tracking-wide text-muted">Favorileri</div>
           <div className="grid grid-cols-6 gap-1.5">
             {p.favorites.slice(0, 6).map((f) => (
-              <a key={f.meta.slug} href={f.meta.url} target="_blank" rel="noreferrer" title={`${f.meta.name} ${star(f.rating)}`}>
+              <a key={f.meta.key} href={f.meta.url} target="_blank" rel="noreferrer" title={`${f.meta.name} ${star(f.rating)}`}>
                 {f.meta.poster ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={f.meta.poster} alt={f.meta.name} className="aspect-[2/3] w-full rounded object-cover" />
@@ -265,16 +265,33 @@ export function Recommendations({
   aiEnabled: boolean;
   onAskAi: () => void;
 }) {
-  const [shown, setShown] = useState(10);
+  const [shown, setShown] = useState(12);
+  const [filter, setFilter] = useState<"all" | "both" | "watchlist" | "discover">("all");
   const aiText = new Map((ai?.items ?? []).map((i) => [i.key, i.text]));
-  const ordered = ai?.pick ? [...recs].sort((x, y) => Number(y.meta.key === ai.pick) - Number(x.meta.key === ai.pick)) : recs;
+
+  const filtered = recs.filter((r) => {
+    if (filter === "both") return r.inA && r.inB;
+    if (filter === "watchlist") return r.source === "watchlist";
+    if (filter === "discover") return r.source === "discover";
+    return true;
+  });
+  const ordered = ai?.pick ? [...filtered].sort((x, y) => Number(y.meta.key === ai.pick) - Number(x.meta.key === ai.pick)) : filtered;
+
+  const counts = {
+    all: recs.length,
+    both: recs.filter((r) => r.inA && r.inB).length,
+    watchlist: recs.filter((r) => r.source === "watchlist").length,
+    discover: recs.filter((r) => r.source === "discover").length,
+  };
 
   return (
     <section className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold">🍿 Sıradaki filminiz</h2>
-          <p className="text-sm text-muted">İkinizin de izlemediği, izleme listelerinizdeki filmler; zevk profillerinize göre sıralandı.</p>
+          <p className="text-sm text-muted">
+            İkinizin de izlemediği filmler: izleme listeleriniz ve zevklerinize özel yeni keşifler birlikte sıralandı.
+          </p>
         </div>
         {aiEnabled && (
           <button
@@ -287,11 +304,35 @@ export function Recommendations({
         )}
       </div>
 
+      <div className="flex flex-wrap gap-2 text-xs">
+        {(
+          [
+            ["all", `Tümü (${counts.all})`],
+            ["both", `Ortak Watchlist (${counts.both})`],
+            ["watchlist", `Watchlist'ten (${counts.watchlist})`],
+            ["discover", `Yeni Keşifler (${counts.discover})`],
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            onClick={() => {
+              setFilter(k);
+              setShown(12);
+            }}
+            className={`rounded-full border px-3 py-1 transition ${
+              filter === k ? "border-lbgreen bg-lbgreen/15 font-semibold text-lbgreen" : "border-line text-muted hover:text-foreground"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {aiState === "error" && <p className="text-sm text-lborange">Gemini yorumu alınamadı, kural tabanlı gerekçeler gösteriliyor.</p>}
       {ai?.summary && <div className="card border-lbgreen/40 text-sm">✨ {ai.summary}</div>}
 
       {ordered.length === 0 && (
-        <div className="card text-muted">Aday film bulunamadı. İzleme listeleriniz boş olabilir ya da içlerindeki her filmi biriniz zaten izlemiş.</div>
+        <div className="card text-muted">Bu filtrede aday film bulunamadı. Diğer sekmeleri deneyebilirsin.</div>
       )}
 
       <div className="flex flex-col gap-3">
@@ -310,7 +351,20 @@ export function Recommendations({
               <div className="flex min-w-0 flex-1 flex-col gap-2">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    {isPick && <div className="text-xs font-bold uppercase tracking-wide text-lbgreen">Bu gecenin seçimi</div>}
+                    <div className="mb-1 flex flex-wrap gap-1.5">
+                      {isPick && <span className="text-xs font-bold uppercase tracking-wide text-lbgreen">Bu gecenin seçimi</span>}
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                          r.inA && r.inB
+                            ? "bg-lbgreen/20 text-lbgreen"
+                            : r.source === "watchlist"
+                              ? "bg-lbblue/15 text-lbblue"
+                              : "bg-lborange/15 text-lborange"
+                        }`}
+                      >
+                        {r.inA && r.inB ? "Ortak Watchlist" : r.source === "watchlist" ? "Watchlist" : "Yeni Keşif"}
+                      </span>
+                    </div>
                     <h3 className="text-lg font-bold">
                       <span className="mr-2 text-muted">#{i + 1}</span>
                       <a href={r.meta.url} target="_blank" rel="noreferrer" className="hover:underline">

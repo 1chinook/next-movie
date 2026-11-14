@@ -5,17 +5,20 @@ import { PersonInput, emptyPerson, type PersonInputState } from "@/components/Pe
 import { CompatibilitySection, ProfileCard, Recommendations, type AiResult } from "@/components/Results";
 import {
   buildCandidates,
+  buildDiscoveryPayload,
   buildProfile,
   compare,
   pickProfileFilms,
   profileSummary,
   recommend,
+  type Candidate,
   type Compatibility,
   type Depth,
   type Profile,
   type Recommendation,
 } from "@/lib/analysis";
 import { importLetterboxdFiles } from "@/lib/exportImport";
+import type { SeedHitInfo } from "@/lib/tmdb";
 import type { FilmLookup, FilmMeta, UserData } from "@/lib/types";
 
 interface Result {
@@ -138,7 +141,32 @@ export default function Home() {
       const pa = buildProfile(a, metas);
       const pb = buildProfile(b, metas);
       const compat = compare(a, b, pa, pb);
-      const recs = recommend(candidates, metas, pa, pb);
+
+      const allCandidates: Candidate[] = [...candidates];
+      const discPayload = buildDiscoveryPayload(a, b, pa, pb, compat, metas);
+      if (discPayload.seeds.length || discPayload.genreIds.length) {
+        setStep("Zevklerinize özel yeni filmler keşfediliyor…");
+        const dRes = await fetch("/api/discover", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(discPayload),
+        });
+        if (dRes.ok) {
+          const dData = (await dRes.json()) as { films?: FilmMeta[]; seedMap?: Record<string, SeedHitInfo> };
+          for (const m of dData.films ?? []) {
+            metas.set(m.key, m);
+            allCandidates.push({
+              ref: { key: m.key, name: m.name, year: m.year, slug: m.slug },
+              inA: false,
+              inB: false,
+              source: "discover",
+              seedInfo: dData.seedMap?.[m.key],
+            });
+          }
+        }
+      }
+
+      const recs = recommend(allCandidates, metas, pa, pb);
       const r: Result = { users: [a, b], profiles: [pa, pb], compat, recs, warning };
       setResult(r);
       if (aiEnabled && recs.length) askAi(r);
