@@ -228,6 +228,7 @@ export default function Home() {
     try {
       setStep("Letterboxd verileri okunuyor…");
       const [a, b] = await Promise.all(people.map(loadUser));
+      setProgress(0.12);
       a.profileId ??= createProfileId();
       b.profileId ??= createProfileId();
       if (a.profileId === b.profileId) throw new Error("Karşılaştırma için iki farklı profil seç.");
@@ -277,18 +278,20 @@ export default function Home() {
           warning = "Film detaylarının bir kısmı alınamadı. İzleme listelerinizdeki filmler yine de önerilerde gösteriliyor.";
           break;
         }
-        setProgress(Math.min(i + BATCH, todo.length) / todo.length);
+        setProgress(0.12 + 0.68 * Math.min(i + BATCH, todo.length) / todo.length);
       }
       if (!warning && metas.size < lookups.size) {
         warning = "Bazı film detayları eksik. Süre, tür, dil, ülke ve puan filtreleri mevcut bilgilere göre çalışır.";
       }
 
       setStep("Zevk profilleri çıkarılıyor…");
+      setProgress(0.82);
       const profiles = analyzeProfiles([a, b], metas, readHistory(key));
       const discoveries: Candidate[] = [];
       const discPayload = buildDiscoveryPayload(profiles.a, profiles.b, profiles.pa, profiles.pb, profiles.compat, profiles.metadata);
       if (discPayload.seeds.length || discPayload.genreIds.length) {
         setStep("Zevklerinize özel yeni filmler keşfediliyor…");
+        setProgress(0.9);
         try {
           const dRes = await fetch("/api/discover", {
             method: "POST",
@@ -331,15 +334,22 @@ export default function Home() {
   const result = useMemo(() => analysisData && evaluate(analysisData, history), [analysisData, history]);
 
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-10">
-      <header className="flex flex-col gap-2 text-center">
-        <div className="flex justify-center gap-1.5">
-          <span className="h-4 w-4 rounded-full bg-lborange" />
-          <span className="h-4 w-4 rounded-full bg-lbgreen" />
-          <span className="h-4 w-4 rounded-full bg-lbblue" />
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-5 sm:gap-7 sm:px-6 sm:py-9">
+      <header className="movie-hero">
+        <div className="relative z-10">
+          <div aria-hidden="true" className="mb-5 flex gap-1.5">
+            <span className="size-2.5 rounded-full bg-lborange" />
+            <span className="size-2.5 rounded-full bg-lbgreen" />
+            <span className="size-2.5 rounded-full bg-lbblue" />
+          </div>
+          <h1 className="text-5xl leading-[0.95] font-black tracking-tight text-white sm:text-7xl">Next Movie</h1>
+          <p className="mt-4 max-w-md text-sm leading-relaxed text-slate-200 sm:text-base">
+            İki Letterboxd profilini karşılaştır ve birlikte izleyeceğiniz filmi bul.
+          </p>
         </div>
-        <h1 className="text-4xl font-black tracking-tight text-white sm:text-5xl">Next Movie</h1>
-        <p className="text-muted">İkinizin Letterboxd geçmişini analiz eder, birlikte izleyeceğiniz sıradaki filmi bulur.</p>
+        <div className="hero-art" aria-hidden="true">
+          <div className="hero-film" />
+        </div>
       </header>
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -370,44 +380,49 @@ export default function Home() {
         ))}
       </div>
 
-      <div className="flex flex-col items-center gap-3">
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-muted">Analiz derinliği:</span>
-          {(
-            [
-              ["fast", "Hızlı"],
-              ["normal", "Normal"],
-              ["deep", "Derin"],
-            ] as const
-          ).map(([d, l]) => (
-            <button
-              key={d}
-              disabled={busy}
-              onClick={() => setDepth(d)}
-              className={`rounded-full border px-3 py-1 ${depth === d ? "border-lbgreen text-lbgreen" : "border-line text-muted hover:text-foreground"}`}
-            >
-              {l}
-            </button>
-          ))}
-        </div>
-        <button
-          onClick={run}
-          disabled={busy}
-          className="rounded-xl bg-lbgreen px-8 py-3 text-lg font-bold text-black shadow-lg shadow-lbgreen/20 transition hover:brightness-110 disabled:opacity-60"
-        >
-          {busy ? "Analiz ediliyor…" : "Analiz et ve film öner"}
-        </button>
-        {busy && (
-          <div className="w-full max-w-md">
-            <div className="h-2 overflow-hidden rounded-full bg-panel-2">
-              <div className="h-2 rounded-full bg-lbgreen transition-all" style={{ width: `${Math.max(4, Math.min(100, progress * 100))}%` }} />
+      <section className="card flex flex-col gap-4" aria-label="Film analizi">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p id="analysis-depth" className="mb-2 text-sm font-medium text-muted">Analiz derinliği</p>
+            <div role="group" aria-labelledby="analysis-depth" className="inline-flex gap-1 rounded-xl border border-line bg-background p-1">
+              {([
+                ["fast", "Hızlı"],
+                ["normal", "Normal"],
+                ["deep", "Derin"],
+              ] as const).map(([d, label]) => (
+                <button
+                  key={d}
+                  type="button"
+                  aria-pressed={depth === d}
+                  disabled={busy}
+                  onClick={() => setDepth(d)}
+                  className={`rounded-lg px-3 py-2 text-sm font-medium ${depth === d ? "bg-panel-2 text-white shadow-sm" : "text-muted hover:text-white"}`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-            <p className="mt-2 text-center text-sm text-muted">{step}</p>
-            <p className="text-center text-xs text-muted">İlk analiz biraz sürebilir; film detayları önbelleğe alınır, sonrakiler hızlıdır.</p>
+          </div>
+          <button
+            type="button"
+            onClick={run}
+            disabled={busy}
+            className="rounded-xl bg-lbgreen px-6 py-3.5 text-base font-bold text-black shadow-lg shadow-lbgreen/15 hover:brightness-110 disabled:opacity-60"
+          >
+            {busy ? "Analiz ediliyor…" : "Analiz et ve film öner"}
+          </button>
+        </div>
+        {busy && (
+          <div className="grid gap-2 rounded-xl border border-line bg-background p-3">
+            <div className="analysis-film" aria-hidden="true" />
+            <div role="progressbar" aria-label="Analiz ilerlemesi" aria-valuenow={Math.round(progress * 100)} className="h-1.5 overflow-hidden rounded-full bg-panel-2">
+              <div className="analysis-fill h-1.5 rounded-full bg-lbgreen" style={{ width: `${progress * 100}%` }} />
+            </div>
+            <p role="status" className="text-sm text-muted">{step}</p>
           </div>
         )}
-        {error && <p className="max-w-xl rounded-lg border border-lborange/50 bg-lborange/10 px-4 py-2 text-center text-sm text-lborange">{error}</p>}
-      </div>
+        {error && <p role="alert" className="rounded-lg border border-lborange/50 bg-lborange/10 px-4 py-2 text-sm text-lborange">{error}</p>}
+      </section>
 
       {historyKey && (
         <SharedHistory
@@ -426,7 +441,7 @@ export default function Home() {
       )}
 
       {result && historyKey && (
-        <>
+        <div className="movie-results flex flex-col gap-5 sm:gap-7">
           {result.warning && <p className="rounded-lg border border-lborange/50 bg-lborange/10 px-4 py-2 text-sm text-lborange">{result.warning}</p>}
           <Recommendations
             recs={result.recs}
@@ -445,7 +460,7 @@ export default function Home() {
             <ProfileCard p={result.profiles[0]} accent="orange" />
             <ProfileCard p={result.profiles[1]} accent="blue" />
           </div>
-        </>
+        </div>
       )}
 
       <footer className="mt-auto pt-8 text-center text-xs text-muted">

@@ -1,17 +1,18 @@
 @import "tailwindcss";
 
 :root {
-  --background: #14181c;
-  --foreground: #d8e0e8;
+  color-scheme: dark;
+  --background: #0d1118;
+  --foreground: #e4e9f0;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-panel: #1c2228;
-  --color-panel-2: #232b33;
-  --color-line: #2c3440;
-  --color-muted: #8899aa;
+  --color-panel: #151c26;
+  --color-panel-2: #1b2532;
+  --color-line: #2c3a4b;
+  --color-muted: #a5b4c6;
   --color-lbgreen: #00e054;
   --color-lborange: #ff8000;
   --color-lbblue: #40bcf4;
@@ -20,14 +21,139 @@
 }
 
 body {
-  background: var(--background);
+  background: radial-gradient(ellipse at 50% 0, #162331 0, transparent 42rem), var(--background);
   color: var(--foreground);
 }
 
+:where(button, a, input, select, summary):focus-visible {
+  outline: 2px solid var(--color-lbgreen);
+  outline-offset: 4px;
+}
+
 .card {
-  @apply rounded-2xl border border-line bg-panel p-5;
+  @apply rounded-2xl border border-line bg-panel p-4 sm:p-5;
 }
 
 .chip {
   @apply inline-flex items-center gap-1 rounded-full border border-line bg-panel-2 px-2.5 py-0.5 text-xs;
+}
+
+.movie-hero {
+  position: relative;
+  display: grid;
+  isolation: isolate;
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+  min-height: 15rem;
+  padding: clamp(1.5rem, 5vw, 3.75rem);
+  border: 1px solid #364a5c;
+  border-radius: 1.6rem;
+  background: linear-gradient(115deg, #15232c 8%, #12202a 52%, #17364a);
+}
+
+.movie-hero::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background: radial-gradient(ellipse at 94% 14%, #40bcf430, transparent 56%),
+    radial-gradient(ellipse at 0 110%, #00e05414, transparent 44%);
+  content: "";
+}
+
+.hero-art {
+  position: relative;
+  display: none;
+  height: 100%;
+  min-height: 9rem;
+}
+
+.hero-film {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 18rem;
+  padding: 0.85rem 0.7rem;
+  border: 1px solid #79bbcb65;
+  border-radius: 0.7rem;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 0.34rem, #d3f1fc80 0.34rem 0.8rem, transparent 0.8rem 1.12rem) center top 0.29rem / calc(100% - 1rem) 0.24rem no-repeat,
+    repeating-linear-gradient(90deg, transparent 0 0.34rem, #d3f1fc80 0.34rem 0.8rem, transparent 0.8rem 1.12rem) center bottom 0.29rem / calc(100% - 1rem) 0.24rem no-repeat,
+    #101c29;
+  box-shadow: 0 1.1rem 3rem #04070c77;
+  transform: translate(-55%, -50%) rotate(-13deg);
+}
+
+.hero-film::before {
+  display: block;
+  aspect-ratio: 2 / 1;
+  border: 1px solid #9addf360;
+  border-radius: 0.35rem;
+  background: linear-gradient(145deg, #09363a 2%, #12756e 38%, #4e91a1 68%, #e9aa68 100%);
+  content: "";
+}
+
+.hero-film::after {
+  position: absolute;
+  inset: 0.92rem 0.78rem;
+  border-radius: 0.28rem;
+  background: linear-gradient(115deg, transparent 25%, #fff8 48%, transparent 62%);
+  background-size: 230% 100%;
+  background-position: 115% 0;
+  content: "";
+}
+
+.analysis-film {
+  position: relative;
+  height: 2.3rem;
+  overflow: hidden;
+  border: 1px solid #496977;
+  border-radius: 0.5rem;
+  background: #152632;
+}
+
+.analysis-film::before {
+  position: absolute;
+  inset: 0 -2rem 0 0;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 0.22rem, #88c7db 0.22rem 0.48rem, transparent 0.48rem 0.67rem) top 0.25rem left / 100% 0.16rem no-repeat,
+    repeating-linear-gradient(90deg, transparent 0 0.22rem, #88c7db 0.22rem 0.48rem, transparent 0.48rem 0.67rem) bottom 0.25rem left / 100% 0.16rem no-repeat,
+    repeating-linear-gradient(90deg, #20605b 0 1.49rem, #0d1118 1.49rem 2rem) center / 100% 0.98rem no-repeat;
+  content: "";
+}
+
+.movie-card {
+  background: linear-gradient(140deg, #1d2a38, var(--color-panel) 45%);
+}
+
+.movie-card-featured {
+  border-color: #3e776a;
+  background: radial-gradient(ellipse at 0 0, #1a4640 0, transparent 55%), var(--color-panel);
+}
+
+@media (min-width: 48rem) {
+  .movie-hero { grid-template-columns: minmax(0, 1fr) minmax(14rem, 0.7fr); }
+  .hero-art { display: block; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hero-film::after { animation: frame-glint 1.25s 150ms ease-out both; }
+  .analysis-film::before { animation: film-roll 1.05s linear infinite; }
+  .analysis-fill { transition: width 360ms ease-out; }
+  .movie-results { animation: results-reveal 380ms ease-out both; }
+  .movie-poster img { transition: transform 280ms ease-out; }
+  .movie-poster:hover img { transform: scale(1.045); }
+}
+
+@keyframes frame-glint {
+  to { background-position: -15% 0; }
+}
+
+@keyframes film-roll {
+  to { transform: translateX(-2rem); }
+}
+
+@keyframes results-reveal {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }

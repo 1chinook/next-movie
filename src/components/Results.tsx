@@ -324,7 +324,7 @@ export function Recommendations({
     <section className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-bold">🍿 Sıradaki filminiz</h2>
+          <h2 className="text-3xl font-bold tracking-tight text-white">Sıradaki filminiz</h2>
           <p className="text-sm text-muted">
             İkinizin de izlemediği filmler: izleme listeleriniz ve zevklerinize özel yeni keşifler birlikte sıralandı.
           </p>
@@ -341,7 +341,7 @@ export function Recommendations({
       </div>
 
       <details className="card py-3">
-        <summary className="cursor-pointer text-sm font-semibold">Film filtreleri{hasMetadataFilters ? " · Etkin" : ""}</summary>
+        <summary className="cursor-pointer text-sm font-semibold marker:text-lbgreen">Film filtreleri{hasMetadataFilters ? " · Etkin" : ""}</summary>
         <fieldset className="mt-3 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3" aria-label="Film filtreleri">
           <label className="grid gap-1 text-sm text-muted">
             En fazla süre (dk)
@@ -378,11 +378,13 @@ export function Recommendations({
         ).map(([k, label]) => (
           <button
             key={k}
+            type="button"
+            aria-pressed={filter === k}
             onClick={() => {
               setFilter(k);
               setShown(12);
             }}
-            className={`rounded-full border px-3 py-1 transition ${
+            className={`rounded-full border px-3 py-1.5 ${
               filter === k ? "border-lbgreen bg-lbgreen/15 font-semibold text-lbgreen" : "border-line text-muted hover:text-foreground"
             }`}
           >
@@ -402,11 +404,11 @@ export function Recommendations({
         {ordered.slice(0, shown).map((r, i) => {
           const isPick = ai?.pick === r.meta.key;
           return (
-            <article key={r.meta.key} className={`card flex gap-4 ${isPick ? "border-lbgreen ring-1 ring-lbgreen" : ""}`}>
-              <a href={r.meta.url} target="_blank" rel="noreferrer" className="w-24 shrink-0 sm:w-28">
+            <article key={r.meta.key} className={`card movie-card flex gap-3 sm:gap-5 ${i === 0 ? "movie-card-featured" : ""}`}>
+              <a href={r.meta.url} target="_blank" rel="noreferrer" className="movie-poster block w-20 shrink-0 self-start overflow-hidden rounded-lg border border-line bg-background sm:w-32">
                 {r.meta.poster ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={r.meta.poster} alt={r.meta.name} className="aspect-[2/3] w-full rounded-lg object-cover" />
+                  <img src={r.meta.poster} alt={r.meta.name} loading={i === 0 ? "eager" : "lazy"} className="aspect-[2/3] w-full object-cover" />
                 ) : (
                   <div className="flex aspect-[2/3] items-center justify-center rounded-lg bg-panel-2 p-2 text-center text-xs">{r.meta.name}</div>
                 )}
@@ -428,25 +430,24 @@ export function Recommendations({
                         {r.inA && r.inB ? "Ortak Watchlist" : r.source === "watchlist" ? "Watchlist" : "Yeni Keşif"}
                       </span>
                     </div>
-                    <h3 className="text-lg font-bold">
-                      <span className="mr-2 text-muted">#{i + 1}</span>
+                    <h3 className="text-lg font-bold tracking-tight text-white sm:text-xl">
                       <a href={r.meta.url} target="_blank" rel="noreferrer" className="hover:underline">
                         {r.meta.name}
                       </a>{" "}
                       <span className="font-normal text-muted">{r.meta.year}</span>
                     </h3>
-                    <div className="text-sm text-muted">
-                      {r.meta.directors.join(", ")}
-                      {r.meta.runtime ? ` · ${r.meta.runtime} dk` : ""}
-                      {r.meta.avgRating ? ` · ${star(r.meta.avgRating)}` : ""}
-                    </div>
+                    <div className="text-sm text-muted">{[
+                      r.meta.directors.join(", "),
+                      r.meta.runtime && `${r.meta.runtime} dk`,
+                      r.meta.avgRating && star(r.meta.avgRating),
+                    ].filter(Boolean).join(" · ")}</div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 text-right">
-                    {!r.detailsUnavailable && <div aria-label="Öneri skoru" className="text-2xl font-black text-lbgreen">{r.score}</div>}
+                    {!r.detailsUnavailable && <div aria-label="Öneri skoru" className="rounded-lg border border-lbgreen/30 bg-lbgreen/10 px-2.5 py-1 text-lg font-bold text-lbgreen">{r.score}</div>}
                     <button
                       type="button"
                       onClick={() => onWatched(r.meta)}
-                      className="rounded-lg bg-lbgreen px-3 py-2 text-sm font-semibold text-black transition hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lbgreen"
+                      className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-foreground hover:border-lbgreen hover:text-lbgreen sm:px-3 sm:text-sm"
                     >
                       Birlikte izledik
                     </button>
