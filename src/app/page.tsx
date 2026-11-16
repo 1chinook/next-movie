@@ -281,7 +281,7 @@ export default function Home() {
         setProgress(0.12 + 0.68 * Math.min(i + BATCH, todo.length) / todo.length);
       }
       if (!warning && metas.size < lookups.size) {
-        warning = "Bazı film detayları eksik. Süre, tür, dil, ülke ve puan filtreleri mevcut bilgilere göre çalışır.";
+        warning = "Bazı film detayları eksik. Filtreler mevcut film bilgilerine göre çalışır.";
       }
 
       setStep("Zevk profilleri çıkarılıyor…");
@@ -289,30 +289,28 @@ export default function Home() {
       const profiles = analyzeProfiles([a, b], metas, readHistory(key));
       const discoveries: Candidate[] = [];
       const discPayload = buildDiscoveryPayload(profiles.a, profiles.b, profiles.pa, profiles.pb, profiles.compat, profiles.metadata);
-      if (discPayload.seeds.length || discPayload.genreIds.length) {
-        setStep("Zevklerinize özel yeni filmler keşfediliyor…");
-        setProgress(0.9);
-        try {
-          const dRes = await fetch("/api/discover", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(discPayload),
+      setStep("Yeni filmler keşfediliyor…");
+      setProgress(0.9);
+      try {
+        const dRes = await fetch("/api/discover", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(discPayload),
+        });
+        if (!dRes.ok) throw new Error("Keşif isteği başarısız.");
+        const dData = (await dRes.json()) as { films?: FilmMeta[]; seedMap?: Record<string, SeedHitInfo> };
+        for (const m of dData.films ?? []) {
+          if (!metas.has(m.key)) metas.set(m.key, m);
+          discoveries.push({
+            ref: { key: m.key, name: m.name, year: m.year, slug: m.slug },
+            inA: false,
+            inB: false,
+            source: "discover",
+            seedInfo: dData.seedMap?.[m.key],
           });
-          if (!dRes.ok) throw new Error("Keşif isteği başarısız.");
-          const dData = (await dRes.json()) as { films?: FilmMeta[]; seedMap?: Record<string, SeedHitInfo> };
-          for (const m of dData.films ?? []) {
-            if (!metas.has(m.key)) metas.set(m.key, m);
-            discoveries.push({
-              ref: { key: m.key, name: m.name, year: m.year, slug: m.slug },
-              inA: false,
-              inB: false,
-              source: "discover",
-              seedInfo: dData.seedMap?.[m.key],
-            });
-          }
-        } catch {
-          warning = [warning, "Yeni keşifler alınamadı. İzleme listelerinizle analiz tamamlandı."].filter(Boolean).join(" ");
         }
+      } catch {
+        warning = [warning, "Yeni keşifler alınamadı. İzleme listelerinizle analiz tamamlandı."].filter(Boolean).join(" ");
       }
 
       const data = { users: [a, b] as [UserData, UserData], depth, metas, discoveries, warning };
@@ -453,7 +451,7 @@ export default function Home() {
             ai={ai}
             aiState={aiState}
             aiEnabled={aiEnabled && result.recs.length > 0}
-            onAskAi={() => askAi(result)}
+            onAskAi={(recs) => askAi({ ...result, recs })}
           />
           <CompatibilitySection c={result.compat} a={result.profiles[0]} b={result.profiles[1]} />
           <div className="grid gap-4 md:grid-cols-2">

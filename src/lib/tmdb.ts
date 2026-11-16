@@ -1,4 +1,5 @@
 import { filmKey, normalizeTitle } from "./keys";
+import { AUDIENCES, audienceOf, audienceReach } from "./moviePreferences";
 import type { FilmLookup, FilmMeta } from "./types";
 
 const TMDB_BASE = "https://api.themoviedb.org/3";
@@ -188,12 +189,36 @@ export interface SeedHitInfo {
   fromSeeds: { name: string; owner: "A" | "B" | "both" }[];
 }
 
+interface DiscoveryCandidate {
+  tmdbId: number;
+  info: SeedHitInfo;
+  key: string;
+  name: string;
+  year?: number;
+  rank: number;
+  voteCount?: number;
+}
+
+export function selectDiscoveryCandidates(candidates: DiscoveryCandidate[], limit: number) {
+  const quotas = [0.4, 0.3, 0.2];
+  const batch = new Map<number, DiscoveryCandidate>();
+  for (const [index, { id }] of AUDIENCES.entries()) {
+    const matches = candidates.filter((movie) => audienceOf(movie.voteCount) === id);
+    for (const movie of matches.slice(0, Math.floor(limit * quotas[index]))) batch.set(movie.tmdbId, movie);
+  }
+  for (const movie of candidates) {
+    if (batch.size >= limit) break;
+    batch.set(movie.tmdbId, movie);
+  }
+  return [...batch.values()].sort((a, b) => b.rank - a.rank);
+}
+
 export async function collectDiscoveryIds(
   seeds: DiscoverSeed[],
   genreIds: number[],
   excludeKeys: Set<string>,
   excludeTmdbIds: Set<number>,
-): Promise<{ tmdbId: number; info: SeedHitInfo; key: string; name: string; year?: number; rank: number }[]> {
+): Promise<DiscoveryCandidate[]> {
   const pool = new Map<number, { item: TmdbMovieSummary; fromSeeds: SeedHitInfo["fromSeeds"]; rank: number }>();
 
   const isExcluded = (m: TmdbMovieSummary) => {
@@ -231,37 +256,39 @@ export async function collectDiscoveryIds(
     }),
   );
 
-  // 2. Ortak sevilen tür kombinasyonlarından yüksek oy sayılı keşif
-  const genreQueries: string[] = [];
-  if (genreIds.length >= 2) genreQueries.push(`${genreIds[0]},${genreIds[1]}`);
-  if (genreIds.length >= 3) genreQueries.push(`${genreIds[0]},${genreIds[2]}`);
-  if (genreIds.length >= 1) genreQueries.push(String(genreIds[0]));
+  // Türleri OR ile birleştirerek tek bir tür kombinasyonunun havuzu ele geçirmesini önle.
+  const withGenres = genreIds.slice(0, 4).join("|");
   const withoutGenres = genreIds.includes(99) ? "10770" : "99,10770";
 
-  await Promise.all(
-    genreQueries.map(async (with_genres) => {
+  const audienceQueries = await Promise.all(
+    AUDIENCES.map(async (audience) => {
       try {
         const res = await tmdbGet<TmdbListResponse>("/discover/movie", {
-          with_genres,
+          with_genres: withGenres,
           without_genres: withoutGenres,
-          sort_by: "vote_average.desc",
-          "vote_count.gte": 1500,
-          "vote_average.gte": 7.2,
+          sort_by: audience.id === "popular" ? "vote_count.desc" : "vote_average.desc",
+          "vote_count.gte": Math.max(audience.min, 50),
+          "vote_count.lte": "max" in audience ? audience.max : undefined,
+          "vote_average.gte": 6.8,
           include_adult: "false",
           language: "en-US",
           page: 1,
         });
-        for (const m of res.results.slice(0, 10)) {
+        for (const m of res.results) {
           if (isExcluded(m)) continue;
           const entry = pool.get(m.id) ?? { item: m, fromSeeds: [], rank: 0 };
-          entry.rank += 1.0 + ((m.vote_average ?? 7) - 7) * 0.5;
+          entry.rank += 2 + ((m.vote_average ?? 7) - 7) * 0.5;
           pool.set(m.id, entry);
         }
+        return true;
       } catch {
-        /* yoksay */
+        return false;
       }
     }),
   );
+  if (!pool.size && audienceQueries.every((succeeded) => !succeeded)) {
+    throw new Error("TMDB keşif verileri alınamadı.");
+  }
 
   return [...pool.entries()]
     .map(([tmdbId, e]) => {
@@ -272,8 +299,9 @@ export async function collectDiscoveryIds(
         key: filmKey(e.item.title || e.item.original_title, year),
         name: e.item.title || e.item.original_title,
         year,
-        rank: e.rank,
+        rank: e.rank + 3 * audienceReach(e.item.vote_count),
+        voteCount: e.item.vote_count,
       };
     })
-    .sort((a, b) => b.rank - a.rank);
+    .sort((a, b) => b.rank - a.rank || (b.voteCount ?? 0) - (a.voteCount ?? 0) || a.tmdbId - b.tmdbId);
 }

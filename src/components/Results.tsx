@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { AUDIENCES, MOODS, audienceOf, moodsFor, type Audience, type Mood } from "@/lib/moviePreferences";
+import { orderRecommendations, SORTS, type RecommendationSort } from "@/lib/recommendationOrder";
 import type { Compatibility, FeatureKind, Profile, Recommendation } from "@/lib/analysis";
 import { KIND_LABEL } from "@/lib/analysis";
 
@@ -267,11 +269,15 @@ export function Recommendations({
   ai: AiResult | null;
   aiState: "idle" | "loading" | "error";
   aiEnabled: boolean;
-  onAskAi: () => void;
+  onAskAi: (visible: Recommendation[]) => void;
   onWatched: (meta: Recommendation["meta"]) => void;
 }) {
   const [shown, setShown] = useState(12);
-  const [fields, setFields] = useState({ runtime: "", genre: "", year: "", language: "", country: "", rating: "" });
+  const initialFields = { runtime: "", genre: "", year: "", language: "", country: "", rating: "" };
+  const [fields, setFields] = useState(initialFields);
+  const [mood, setMood] = useState<Mood | "">("");
+  const [audience, setAudience] = useState<Audience | "">("");
+  const [sort, setSort] = useState<RecommendationSort>("balanced");
   const languageNames = new Intl.DisplayNames(["tr"], { type: "language", fallback: "code" });
   const options = (values: string[], selected: string) => [...new Set([...values, selected].filter(Boolean))].sort((x, y) => x.localeCompare(y, "tr"));
   const genres = options(recs.flatMap((r) => r.meta.genres), fields.genre);
@@ -283,6 +289,8 @@ export function Recommendations({
   const aiText = new Map((ai?.items ?? []).map((i) => [i.key, i.text]));
 
   const metadataMatches = recs.filter(({ meta }) => {
+    if (mood && !moodsFor(meta).includes(mood)) return false;
+    if (audience && audienceOf(meta.voteCount) !== audience) return false;
     if (fields.runtime && (!meta.runtime || meta.runtime > Number(fields.runtime))) return false;
     if (fields.genre && !meta.genres.includes(fields.genre)) return false;
     if (fields.year && (!meta.year || Math.floor(meta.year / 10) * 10 !== Number(fields.year))) return false;
@@ -297,7 +305,7 @@ export function Recommendations({
     if (filter === "discover") return r.source === "discover";
     return true;
   });
-  const ordered = ai?.pick ? [...filtered].sort((x, y) => Number(y.meta.key === ai.pick) - Number(x.meta.key === ai.pick)) : filtered;
+  const ordered = orderRecommendations(filtered, sort);
 
   const counts = {
     all: metadataMatches.length,
@@ -317,6 +325,14 @@ export function Recommendations({
     setFields((previous) => ({ ...previous, [key]: value }));
     setShown(12);
   };
+  const clearFilters = () => {
+    setFields(initialFields);
+    setMood("");
+    setAudience("");
+    setFilter("all");
+    setSort("balanced");
+    setShown(12);
+  };
   const hasMetadataFilters = Object.values(fields).some(Boolean);
   const inputClass = "min-w-0 w-full rounded-lg border border-line bg-panel-2 px-3 py-2 text-foreground";
 
@@ -331,13 +347,60 @@ export function Recommendations({
         </div>
         {aiEnabled && (
           <button
-            onClick={onAskAi}
-            disabled={aiState === "loading"}
+            onClick={() => onAskAi(ordered)}
+            disabled={aiState === "loading" || !ordered.length}
             className="rounded-lg border border-lbgreen px-4 py-2 text-sm font-semibold text-lbgreen transition hover:bg-lbgreen hover:text-black disabled:opacity-50"
           >
             {aiState === "loading" ? "Gemini düşünüyor…" : ai ? "✨ Yeniden yorumlat" : "✨ Gemini ile yorumlat"}
           </button>
         )}
+      </div>
+
+      <div className="card grid gap-4">
+        <fieldset className="min-w-0">
+          <legend className="mb-2 text-sm font-semibold text-white">Bu akşam ne izlemek istersiniz?</legend>
+          <div className="flex flex-wrap gap-2">
+            {[{ id: "", label: "Her ruh hâli" } as const, ...MOODS].map(({ id, label }) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={mood === id}
+                onClick={() => { setMood(id); setShown(12); }}
+                className={`rounded-full border px-3 py-2 text-sm ${mood === id ? "border-lbgreen bg-lbgreen/15 text-lbgreen" : "border-line text-muted hover:text-white"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-muted">Ruh hâli etiketleri film türlerinden tahmin edilir.</p>
+        </fieldset>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label className="grid gap-1 text-sm text-muted">
+            Popülerlik
+            <select className={inputClass} value={audience} onChange={(event) => { setAudience(event.target.value as Audience | ""); setShown(12); }}>
+              <option value="">Tüm filmler</option>
+              {AUDIENCES.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm text-muted">
+            Zaman
+            <select className={inputClass} value={["", "90", "120", "150"].includes(fields.runtime) ? fields.runtime : "custom"}
+              onChange={(event) => changeFilter("runtime", event.target.value)}>
+              <option value="">Süre sınırı yok</option>
+              <option value="90">En fazla 90 dk</option>
+              <option value="120">En fazla 2 saat</option>
+              <option value="150">En fazla 2,5 saat</option>
+              {fields.runtime && !["90", "120", "150"].includes(fields.runtime) && <option value="custom" disabled>{fields.runtime} dk</option>}
+            </select>
+          </label>
+          <label className="grid gap-1 text-sm text-muted">
+            Sıralama
+            <select className={inputClass} value={sort} onChange={(event) => { setSort(event.target.value as RecommendationSort); setShown(12); }}>
+              {SORTS.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+            </select>
+          </label>
+        </div>
+        {audience && <p className="text-xs text-muted">Niş: 1–299 oy · Orta kitle: 300–1.499 oy · Popüler: 1.500 ve üzeri oy. Oy sayısı bilinmeyenler bu filtreye girmez.</p>}
       </div>
 
       <details className="card py-3">
@@ -358,11 +421,7 @@ export function Recommendations({
             </label>
           ))}
           <button type="button" className="justify-self-start text-sm text-muted underline hover:text-foreground"
-            onClick={() => {
-              setFields({ runtime: "", genre: "", year: "", language: "", country: "", rating: "" });
-              setFilter("all");
-              setShown(12);
-            }}>
+            onClick={clearFilters}>
             Filtreleri temizle
           </button>
         </fieldset>
@@ -394,15 +453,20 @@ export function Recommendations({
       </div>
 
       {aiState === "error" && <p className="text-sm text-lborange">Gemini yorumu alınamadı, kural tabanlı gerekçeler gösteriliyor.</p>}
-      {ai?.summary && <div className="card border-lbgreen/40 text-sm">✨ {ai.summary}</div>}
+      {ai?.summary && ordered.some((film) => film.meta.key === ai.pick) && <div className="card border-lbgreen/40 text-sm">✨ {ai.summary}</div>}
 
       {ordered.length === 0 && (
-        <div className="card text-muted">{recs.length ? "Bu filtrelere uyan film bulunamadı." : "Şu anda önerilecek film bulunamadı."}</div>
+        <div className="card text-muted">
+          {recs.length ? "Bu filtrelere uyan film bulunamadı." : "Şu anda önerilecek film bulunamadı."}
+          {recs.length > 0 && <button type="button" className="ml-3 font-medium text-lbgreen underline" onClick={clearFilters}>Filtreleri temizle</button>}
+        </div>
       )}
 
       <div className="flex flex-col gap-3">
         {ordered.slice(0, shown).map((r, i) => {
           const isPick = ai?.pick === r.meta.key;
+          const reach = AUDIENCES.find(({ id }) => id === audienceOf(r.meta.voteCount));
+          const moods = moodsFor(r.meta);
           return (
             <article key={r.meta.key} className={`card movie-card flex gap-3 sm:gap-5 ${i === 0 ? "movie-card-featured" : ""}`}>
               <a href={r.meta.url} target="_blank" rel="noreferrer" className="movie-poster block w-20 shrink-0 self-start overflow-hidden rounded-lg border border-line bg-background sm:w-32">
@@ -472,6 +536,9 @@ export function Recommendations({
                 </div>}
 
                 <div className="flex flex-wrap gap-1.5">
+                  {reach && <span className="chip" title={r.meta.voteCount?.toLocaleString("tr-TR") + " oy"}>{reach.label}</span>}
+                  {mood && <span className="chip">{MOODS.find(({ id }) => mood === id)?.label}</span>}
+                  {!mood && moods.length > 0 && <span className="chip">{MOODS.find(({ id }) => moods[0] === id)?.label}</span>}
                   {r.meta.genres.slice(0, 4).map((g) => (
                     <span key={g} className="chip">
                       {g}

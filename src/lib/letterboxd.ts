@@ -2,7 +2,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { decodeEntities, filmKey, splitNameYear } from "./keys";
-import { collectDiscoveryIds, fetchTmdbFilmMeta, fetchTmdbMovieDetail, hasTmdbConfig, type DiscoverSeed, type SeedHitInfo } from "./tmdb";
+import { collectDiscoveryIds, fetchTmdbFilmMeta, fetchTmdbMovieDetail, hasTmdbConfig, selectDiscoveryCandidates, type DiscoverSeed, type SeedHitInfo } from "./tmdb";
 import type { FilmLookup, FilmMeta, FilmRef } from "./types";
 
 const BASE = "https://letterboxd.com";
@@ -252,7 +252,7 @@ export async function discoverFilms(params: {
     new Set(params.excludeTmdbIds),
   );
 
-  const picked = candidates.slice(0, params.limit ?? 30);
+  const picked = selectDiscoveryCandidates(candidates, params.limit ?? 30);
   const seedMap: Record<string, SeedHitInfo> = {};
 
   const films = await mapLimit(picked, 4, async (cand): Promise<FilmMeta | null> => {

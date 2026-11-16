@@ -15,9 +15,7 @@ export async function POST(request: Request) {
     return Response.json({ films: [], seedMap: {}, enabled: false });
   }
   const body = (await request.json().catch(() => null)) as DiscoverBody | null;
-  if (!body?.seeds?.length && !body?.genreIds?.length) {
-    return Response.json({ films: [], seedMap: {}, enabled: true });
-  }
+  if (!body) return Response.json({ error: "Geçersiz keşif isteği." }, { status: 400 });
 
   try {
     const res = await discoverFilms({

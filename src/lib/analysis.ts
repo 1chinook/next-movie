@@ -1,5 +1,6 @@
 import type { DiscoverSeed, SeedHitInfo } from "./tmdb";
 import type { FilmMeta, FilmRef, UserData } from "./types";
+import { audienceReach } from "./moviePreferences";
 
 export type FeatureKind = "genre" | "director" | "actor" | "decade" | "country" | "language" | "runtime";
 
@@ -627,9 +628,10 @@ export function recommend(
 
     const seedCount = c.seedInfo?.fromSeeds.length ?? 0;
     const hasBothSeed = c.seedInfo?.fromSeeds.some((s) => s.owner === "both");
-    if (seedCount > 0) score += Math.min(11, seedCount * 3.5 + (hasBothSeed ? 3 : 0));
+    if (seedCount > 0) score += Math.min(7, seedCount * 2 + (hasBothSeed ? 2 : 0));
 
     const voteWeight = (m.voteCount ?? 0) / ((m.voteCount ?? 0) + 150);
+    if (m.voteCount) score += 9 * (audienceReach(m.voteCount) - 0.5);
     if (m.avgRating) score += (m.avgRating - 3.3) * 4 * voteWeight;
     if (weakerMatch < 45) score -= (45 - weakerMatch) * 0.4;
     score = Math.max(10, Math.min(99, Math.round(score)));
