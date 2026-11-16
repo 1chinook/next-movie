@@ -116,15 +116,16 @@ export async function scrapeUser(rawUsername: string, maxPages = 40) {
 
 const CACHE_FILE = path.join(process.cwd(), ".cache", "films.json");
 let memCache: Map<string, FilmMeta> | null = null;
+let cacheLoad: Promise<Map<string, FilmMeta>> | undefined;
 let writeTimer: NodeJS.Timeout | null = null;
+let tmdbRetryAfter = 0;
 
 async function cache(): Promise<Map<string, FilmMeta>> {
   if (memCache) return memCache;
-  try {
-    memCache = new Map(Object.entries(JSON.parse(await fs.readFile(CACHE_FILE, "utf8"))));
-  } catch {
-    memCache = new Map();
-  }
+  cacheLoad ??= fs.readFile(CACHE_FILE, "utf8")
+    .then((raw) => new Map<string, FilmMeta>(Object.entries(JSON.parse(raw))))
+    .catch(() => new Map<string, FilmMeta>());
+  memCache = await cacheLoad;
   return memCache;
 }
 
@@ -133,8 +134,12 @@ function scheduleWrite() {
   writeTimer = setTimeout(async () => {
     writeTimer = null;
     if (!memCache) return;
-    await fs.mkdir(path.dirname(CACHE_FILE), { recursive: true });
-    await fs.writeFile(CACHE_FILE, JSON.stringify(Object.fromEntries(memCache)));
+    try {
+      await fs.mkdir(path.dirname(CACHE_FILE), { recursive: true });
+      await fs.writeFile(CACHE_FILE, JSON.stringify(Object.fromEntries(memCache)));
+    } catch (error) {
+      console.warn("Film önbelleği diske yazılamadı.", error);
+    }
   }, 1500);
 }
 
@@ -186,16 +191,27 @@ export async function getFilmMeta(lookup: FilmLookup): Promise<FilmMeta | null> 
   const c = await cache();
 
   if (hasTmdbConfig()) {
-    const tmdbKey = `tmdb:${lookup.key}`;
+    const tmdbKey = `tmdb-v2:${lookup.key}`;
     const hit = c.get(tmdbKey);
     if (hit && hit.tmdbId) return { ...hit, key: lookup.key };
 
-    const meta = await fetchTmdbFilmMeta(lookup);
-    if (meta) {
-      c.set(tmdbKey, meta);
-      scheduleWrite();
+    const legacy = c.get("tmdb:" + lookup.key);
+    try {
+      if (Date.now() >= tmdbRetryAfter) {
+        const meta = legacy?.tmdbId
+          ? await fetchTmdbMovieDetail(legacy.tmdbId, lookup)
+          : await fetchTmdbFilmMeta(lookup);
+        if (meta) {
+          c.set(tmdbKey, meta);
+          scheduleWrite();
+          return meta;
+        }
+      }
+    } catch {
+      // Dış servis arızasında her film için aynı zaman aşımını bekleme.
+      tmdbRetryAfter = Date.now() + 60_000;
     }
-    return meta;
+    return legacy ? { ...legacy, key: lookup.key } : null;
   }
 
   const cacheKey = lookup.slug ? `slug:${lookup.slug}` : lookup.uri ? `uri:${lookup.uri}` : null;
@@ -239,10 +255,12 @@ export async function discoverFilms(params: {
   const picked = candidates.slice(0, params.limit ?? 30);
   const seedMap: Record<string, SeedHitInfo> = {};
 
-  const films = await mapLimit(picked, 4, async (cand) => {
-    const tmdbKey = `tmdb:${cand.key}`;
-    const byIdKey = `tmdbid:${cand.tmdbId}`;
-    let meta = c.get(byIdKey) ?? c.get(tmdbKey);
+  const films = await mapLimit(picked, 4, async (cand): Promise<FilmMeta | null> => {
+    const tmdbKey = `tmdb-v2:${cand.key}`;
+    const byIdKey = `tmdbid-v2:${cand.tmdbId}`;
+    const cached = c.get(byIdKey) ?? c.get(tmdbKey)
+      ?? c.get("tmdbid:" + cand.tmdbId) ?? c.get("tmdb:" + cand.key);
+    let meta = cached?.tmdbId === cand.tmdbId ? cached : undefined;
     if (!meta) {
       try {
         meta = await fetchTmdbMovieDetail(cand.tmdbId, { key: cand.key, name: cand.name, year: cand.year });
@@ -253,8 +271,8 @@ export async function discoverFilms(params: {
         return null;
       }
     }
-    seedMap[meta.key] = cand.info;
-    return meta;
+    seedMap[cand.key] = cand.info;
+    return { ...meta, key: cand.key, name: cand.name, year: cand.year ?? meta.year };
   });
 
   return { films: films.filter((m): m is FilmMeta => Boolean(m)), seedMap };

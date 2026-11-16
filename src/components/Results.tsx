@@ -59,13 +59,13 @@ export function CompatibilitySection({ c, a, b }: { c: Compatibility; a: Profile
   return (
     <section className="card flex flex-col gap-6">
       <div className="flex flex-col items-center gap-6 sm:flex-row">
-        <ScoreRing score={c.score} />
+        {c.hasEvidence && <ScoreRing score={c.score} />}
         <div className="flex-1">
           <h2 className="text-2xl font-bold">
             <span className="text-lborange">{a.label}</span> & <span className="text-lbblue">{b.label}</span> uyumu
           </h2>
-          <p className="mt-1 text-muted">{compatText(c)}</p>
-          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <p className="mt-1 text-muted">{c.hasEvidence ? compatText(c) : "Uyum puanı için yeterli veri yok."}</p>
+          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3">
             <Stat label="Ortak izlenen" value={String(c.commonWatched)} hint={`Jaccard %${(c.jaccard * 100).toFixed(1)}`} />
             <Stat label="İkisi de puanlamış" value={String(c.bothRated)} />
             <Stat
@@ -73,7 +73,8 @@ export function CompatibilitySection({ c, a, b }: { c: Compatibility; a: Profile
               value={c.correlation === undefined ? "–" : c.correlation.toFixed(2)}
               hint={c.meanAbsDiff !== undefined ? `ort. fark ${c.meanAbsDiff.toFixed(2)}★` : "en az 3 ortak puan gerekir"}
             />
-            <Stat label="Tür benzerliği" value={`%${Math.round(((c.genreSimilarity + 1) / 2) * 100)}`} />
+            <Stat label="Tür benzerliği" value={c.genreSimilarity === undefined ? "-" : `%${Math.round(((c.genreSimilarity + 1) / 2) * 100)}`} />
+            <Stat label="Göreli puan uyumu" value={c.ratingAgreement === undefined ? "-" : `%${Math.round(c.ratingAgreement * 100)}`} hint="Kişisel puan ortalamalarına göre" />
           </div>
         </div>
       </div>
@@ -161,13 +162,15 @@ function FilmPairs({ title, rows, a, b }: { title: string; rows: Compatibility["
   );
 }
 
-const KINDS: FeatureKind[] = ["genre", "director", "actor", "decade", "country"];
+const KINDS: FeatureKind[] = ["genre", "director", "actor", "decade", "country", "language", "runtime"];
 const PLURAL: Record<FeatureKind, string> = {
   genre: "türler",
   director: "yönetmenler",
   actor: "oyuncular",
   decade: "dönemler",
   country: "ülkeler",
+  language: "diller",
+  runtime: "süreler",
 };
 
 export function ProfileCard({ p, accent }: { p: Profile; accent: "orange" | "blue" }) {
@@ -256,6 +259,7 @@ export function Recommendations({
   aiState,
   aiEnabled,
   onAskAi,
+  onWatched,
 }: {
   recs: Recommendation[];
   a: string;
@@ -264,12 +268,30 @@ export function Recommendations({
   aiState: "idle" | "loading" | "error";
   aiEnabled: boolean;
   onAskAi: () => void;
+  onWatched: (meta: Recommendation["meta"]) => void;
 }) {
   const [shown, setShown] = useState(12);
+  const [fields, setFields] = useState({ runtime: "", genre: "", year: "", language: "", country: "", rating: "" });
+  const languageNames = new Intl.DisplayNames(["tr"], { type: "language", fallback: "code" });
+  const options = (values: string[], selected: string) => [...new Set([...values, selected].filter(Boolean))].sort((x, y) => x.localeCompare(y, "tr"));
+  const genres = options(recs.flatMap((r) => r.meta.genres), fields.genre);
+  const countries = options(recs.flatMap((r) => r.meta.countries), fields.country);
+  const languages = options(recs.flatMap((r) => r.meta.originalLanguage && /^[a-z]{2,3}$/i.test(r.meta.originalLanguage) ? [r.meta.originalLanguage] : []), fields.language);
+  const decades = options(recs.flatMap((r) => r.meta.year ? [String(Math.floor(r.meta.year / 10) * 10)] : []), fields.year)
+    .map(Number).sort((x, y) => y - x);
   const [filter, setFilter] = useState<"all" | "both" | "watchlist" | "discover">("all");
   const aiText = new Map((ai?.items ?? []).map((i) => [i.key, i.text]));
 
-  const filtered = recs.filter((r) => {
+  const metadataMatches = recs.filter(({ meta }) => {
+    if (fields.runtime && (!meta.runtime || meta.runtime > Number(fields.runtime))) return false;
+    if (fields.genre && !meta.genres.includes(fields.genre)) return false;
+    if (fields.year && (!meta.year || Math.floor(meta.year / 10) * 10 !== Number(fields.year))) return false;
+    if (fields.language && meta.originalLanguage !== fields.language) return false;
+    if (fields.country && !meta.countries.includes(fields.country)) return false;
+    if (fields.rating && (meta.avgRating ?? 0) < Number(fields.rating)) return false;
+    return true;
+  });
+  const filtered = metadataMatches.filter((r) => {
     if (filter === "both") return r.inA && r.inB;
     if (filter === "watchlist") return r.source === "watchlist";
     if (filter === "discover") return r.source === "discover";
@@ -278,11 +300,25 @@ export function Recommendations({
   const ordered = ai?.pick ? [...filtered].sort((x, y) => Number(y.meta.key === ai.pick) - Number(x.meta.key === ai.pick)) : filtered;
 
   const counts = {
-    all: recs.length,
-    both: recs.filter((r) => r.inA && r.inB).length,
-    watchlist: recs.filter((r) => r.source === "watchlist").length,
-    discover: recs.filter((r) => r.source === "discover").length,
+    all: metadataMatches.length,
+    both: metadataMatches.filter((r) => r.inA && r.inB).length,
+    watchlist: metadataMatches.filter((r) => r.source === "watchlist").length,
+    discover: metadataMatches.filter((r) => r.source === "discover").length,
   };
+
+  const selects: { key: keyof typeof fields; label: string; choices: [string, string][] }[] = [
+    { key: "genre", label: "Tür", choices: genres.map((value) => [value, value]) },
+    { key: "year", label: "Çıkış dönemi", choices: decades.map((value) => [String(value), value + "–" + (value + 9)]) },
+    { key: "language", label: "Orijinal dil", choices: languages.map((value) => [value, languageNames.of(value) ?? value]) },
+    { key: "country", label: "Yapım ülkesi", choices: countries.map((value) => [value, value]) },
+    { key: "rating", label: "En düşük ortalama puan", choices: [["3", "3 / 5"], ["3.5", "3,5 / 5"], ["4", "4 / 5"]] },
+  ];
+  const changeFilter = (key: keyof typeof fields, value: string) => {
+    setFields((previous) => ({ ...previous, [key]: value }));
+    setShown(12);
+  };
+  const hasMetadataFilters = Object.values(fields).some(Boolean);
+  const inputClass = "min-w-0 w-full rounded-lg border border-line bg-panel-2 px-3 py-2 text-foreground";
 
   return (
     <section className="flex flex-col gap-4">
@@ -304,6 +340,33 @@ export function Recommendations({
         )}
       </div>
 
+      <details className="card py-3">
+        <summary className="cursor-pointer text-sm font-semibold">Film filtreleri{hasMetadataFilters ? " · Etkin" : ""}</summary>
+        <fieldset className="mt-3 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3" aria-label="Film filtreleri">
+          <label className="grid gap-1 text-sm text-muted">
+            En fazla süre (dk)
+            <input className={inputClass} type="number" min="1" step="1" inputMode="numeric" placeholder="Örn. 90"
+              value={fields.runtime} onChange={(event) => changeFilter("runtime", event.target.value)} />
+          </label>
+          {selects.map(({ key, label, choices }) => (
+            <label key={key} className="grid gap-1 text-sm text-muted">
+              {label}
+              <select className={inputClass} value={fields[key]} onChange={(event) => changeFilter(key, event.target.value)}>
+                <option value="">Tümü</option>
+                {choices.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+              </select>
+            </label>
+          ))}
+          <button type="button" className="justify-self-start text-sm text-muted underline hover:text-foreground"
+            onClick={() => {
+              setFields({ runtime: "", genre: "", year: "", language: "", country: "", rating: "" });
+              setFilter("all");
+              setShown(12);
+            }}>
+            Filtreleri temizle
+          </button>
+        </fieldset>
+      </details>
       <div className="flex flex-wrap gap-2 text-xs">
         {(
           [
@@ -332,7 +395,7 @@ export function Recommendations({
       {ai?.summary && <div className="card border-lbgreen/40 text-sm">✨ {ai.summary}</div>}
 
       {ordered.length === 0 && (
-        <div className="card text-muted">Bu filtrede aday film bulunamadı. Diğer sekmeleri deneyebilirsin.</div>
+        <div className="card text-muted">{recs.length ? "Bu filtrelere uyan film bulunamadı." : "Şu anda önerilecek film bulunamadı."}</div>
       )}
 
       <div className="flex flex-col gap-3">
@@ -378,13 +441,19 @@ export function Recommendations({
                       {r.meta.avgRating ? ` · ${star(r.meta.avgRating)}` : ""}
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-3xl font-black text-lbgreen">{r.score}</div>
-                    <div className="text-[10px] uppercase text-muted">skor</div>
+                  <div className="flex flex-wrap items-center gap-2 text-right">
+                    {!r.detailsUnavailable && <div aria-label="Öneri skoru" className="text-2xl font-black text-lbgreen">{r.score}</div>}
+                    <button
+                      type="button"
+                      onClick={() => onWatched(r.meta)}
+                      className="rounded-lg bg-lbgreen px-3 py-2 text-sm font-semibold text-black transition hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lbgreen"
+                    >
+                      Birlikte izledik
+                    </button>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 text-xs">
+                {r.detailsUnavailable ? <p className="text-xs text-muted">Film detayları alınamadı.</p> : <div className="grid grid-cols-2 gap-3 text-xs">
                   {[
                     [a, r.matchA, "bg-lborange"],
                     [b, r.matchB, "bg-lbblue"],
@@ -399,7 +468,7 @@ export function Recommendations({
                       </div>
                     </div>
                   ))}
-                </div>
+                </div>}
 
                 <div className="flex flex-wrap gap-1.5">
                   {r.meta.genres.slice(0, 4).map((g) => (

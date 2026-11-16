@@ -16,6 +16,7 @@ export interface FilmRef {
 export interface UserData {
   label: string;
   source: "export" | "username";
+  profileId?: string;
   watched: FilmRef[];
   watchlist: FilmRef[];
 }
@@ -26,6 +27,7 @@ export interface FilmMeta {
   slug: string;
   name: string;
   originalName?: string;
+  originalLanguage?: string;
   year?: number;
   tmdbId?: number;
   genreIds?: number[];

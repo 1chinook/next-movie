@@ -1,15 +1,17 @@
 import type { DiscoverSeed, SeedHitInfo } from "./tmdb";
 import type { FilmMeta, FilmRef, UserData } from "./types";
 
-export type FeatureKind = "genre" | "director" | "actor" | "decade" | "country";
+export type FeatureKind = "genre" | "director" | "actor" | "decade" | "country" | "language" | "runtime";
 
-const KIND_WEIGHT: Record<FeatureKind, number> = { genre: 1.0, director: 2.4, actor: 0.9, decade: 0.5, country: 0.55 };
+const KIND_WEIGHT: Record<FeatureKind, number> = { genre: 1.0, director: 2.4, actor: 0.9, decade: 0.5, country: 0.55, language: 0.4, runtime: 0.35 };
 export const KIND_LABEL: Record<FeatureKind, string> = {
   genre: "Tür",
   director: "Yönetmen",
   actor: "Oyuncu",
   decade: "Dönem",
   country: "Ülke",
+  language: "Dil",
+  runtime: "Süre",
 };
 
 export interface FeatureStat {
@@ -48,6 +50,14 @@ export const DEPTH_LIMITS: Record<Depth, { profile: number; candidates: number }
 
 const fkey = (kind: FeatureKind, name: string) => `${kind}:${name}`;
 const decadeOf = (y?: number) => (y ? `${Math.floor(y / 10) * 10}'ler` : null);
+const languageNames = new Intl.DisplayNames("tr", { type: "language", fallback: "code" });
+
+function runtimeBand(minutes: number) {
+  if (minutes < 90) return "90 dk altı";
+  if (minutes < 120) return "90–119 dk";
+  if (minutes < 150) return "120–149 dk";
+  return "150 dk ve üzeri";
+}
 
 function featuresOf(m: FilmMeta): { kind: FeatureKind; name: string }[] {
   const out: { kind: FeatureKind; name: string }[] = [];
@@ -57,6 +67,10 @@ function featuresOf(m: FilmMeta): { kind: FeatureKind; name: string }[] {
   m.countries.slice(0, 2).forEach((name) => out.push({ kind: "country", name }));
   const d = decadeOf(m.year);
   if (d) out.push({ kind: "decade", name: d });
+  if (m.originalLanguage && /^[a-z]{2,3}$/i.test(m.originalLanguage)) {
+    out.push({ kind: "language", name: languageNames.of(m.originalLanguage.toLowerCase()) ?? m.originalLanguage });
+  }
+  if (m.runtime && m.runtime > 0) out.push({ kind: "runtime", name: runtimeBand(m.runtime) });
   return out;
 }
 
@@ -152,8 +166,8 @@ export function buildCandidates(a: UserData, b: UserData, depth: Depth): Candida
   const onlyB = all.filter((c) => c.inB && !c.inA);
 
   const singleCap = Math.max(0, DEPTH_LIMITS[depth].candidates - both.length);
-  const half = Math.ceil(singleCap / 2);
-  const pickedA = sampleEvenly(onlyA, half);
+  const shareA = Math.max(Math.ceil(singleCap / 2), singleCap - onlyB.length);
+  const pickedA = sampleEvenly(onlyA, shareA);
   const pickedB = sampleEvenly(onlyB, singleCap - pickedA.length);
   return [...both, ...pickedA, ...pickedB];
 }
@@ -220,11 +234,10 @@ export function buildProfile(user: UserData, metas: Map<string, FilmMeta>): Prof
     });
   }
 
-  const minCount: Record<FeatureKind, number> = { genre: 2, director: 2, actor: 2, decade: 2, country: 2 };
   const top = {} as Profile["top"];
   (Object.keys(KIND_WEIGHT) as FeatureKind[]).forEach((kind) => {
     top[kind] = [...final.values()]
-      .filter((s) => s.kind === kind && s.count >= minCount[kind] && s.score > 0.05)
+      .filter((s) => s.kind === kind && s.count >= 2 && s.score > 0.05)
       .sort((a, b) => b.score - a.score)
       .slice(0, 8);
   });
@@ -263,12 +276,14 @@ export function buildProfile(user: UserData, metas: Map<string, FilmMeta>): Prof
 
 export interface Compatibility {
   score: number;
+  hasEvidence: boolean;
   commonWatched: number;
   jaccard: number;
   bothRated: number;
   correlation?: number;
   meanAbsDiff?: number;
-  genreSimilarity: number;
+  ratingAgreement?: number;
+  genreSimilarity?: number;
   agreements: { name: string; year?: number; a: number; b: number }[];
   disagreements: { name: string; year?: number; a: number; b: number }[];
   sharedLoves: FeatureStat[];
@@ -286,7 +301,9 @@ export function compare(a: UserData, b: UserData, pa: Profile, pb: Profile): Com
   });
 
   let correlation: number | undefined;
-  let meanAbsDiff: number | undefined;
+  const meanAbsDiff = pairs.length
+    ? pairs.reduce((s, p) => s + Math.abs(p.a - p.b), 0) / pairs.length
+    : undefined;
   if (pairs.length >= 3) {
     const ma = pairs.reduce((s, p) => s + p.a, 0) / pairs.length;
     const mb = pairs.reduce((s, p) => s + p.b, 0) / pairs.length;
@@ -298,8 +315,7 @@ export function compare(a: UserData, b: UserData, pa: Profile, pb: Profile): Com
       da += (p.a - ma) ** 2;
       db += (p.b - mb) ** 2;
     }
-    correlation = da && db ? num / Math.sqrt(da * db) : 0;
-    meanAbsDiff = pairs.reduce((s, p) => s + Math.abs(p.a - p.b), 0) / pairs.length;
+    correlation = da && db ? num / Math.sqrt(da * db) : undefined;
   }
 
   const genres = new Set<string>();
@@ -314,7 +330,7 @@ export function compare(a: UserData, b: UserData, pa: Profile, pb: Profile): Com
     na += x * x;
     nb += y * y;
   }
-  const genreSimilarity = na && nb ? dot / Math.sqrt(na * nb) : 0;
+  const genreSimilarity = na && nb ? dot / Math.sqrt(na * nb) : undefined;
 
   const sharedLoves: FeatureStat[] = [];
   const clashes: Compatibility["clashes"] = [];
@@ -336,17 +352,54 @@ export function compare(a: UserData, b: UserData, pa: Profile, pb: Profile): Com
     .sort((x, y) => y.a + y.b - (x.a + x.b))
     .slice(0, 10);
 
-  const corrPart = correlation !== undefined && pairs.length >= 5 ? (correlation + 1) / 2 : 0.55;
-  const overlapPart = Math.min(1, (common.length / Math.max(1, union)) * 4);
-  const score = Math.round(100 * (0.4 * corrPart + 0.4 * ((genreSimilarity + 1) / 2) + 0.2 * overlapPart));
+  const ratingAgreement = pairs.length
+    ? 1 - pairs.reduce((sum, pair) => {
+      const aDeviation = pair.a - (pa.avgRating ?? 3);
+      const bDeviation = pair.b - (pb.avgRating ?? 3);
+      return sum + Math.min(1, Math.abs(aDeviation - bDeviation) / 3);
+    }, 0) / pairs.length
+    : undefined;
+  const ratingConfidence = pairs.length / (pairs.length + 12);
+  const agreementSignal = (ratingAgreement ?? 0.5) * 2 - 1;
+  const ratingSignal = ratingConfidence * (correlation === undefined
+    ? agreementSignal
+    : 0.65 * correlation + 0.35 * agreementSignal);
+  let tasteSignal = 0;
+  let weightSum = 0;
+  for (const kind of Object.keys(KIND_WEIGHT) as FeatureKind[]) {
+    let product = 0;
+    let squaredA = 0;
+    let squaredB = 0;
+    let sharedEvidence = 0;
+    for (const [key, stat] of pa.features) {
+      if (stat.kind !== kind) continue;
+      const other = pb.features.get(key);
+      squaredA += stat.score ** 2;
+      if (!other) continue;
+      product += stat.score * other.score;
+      sharedEvidence += Math.min(stat.count, other.count);
+    }
+    for (const stat of pb.features.values()) {
+      if (stat.kind === kind) squaredB += stat.score ** 2;
+    }
+    if (!squaredA || !squaredB) continue;
+    const weight = KIND_WEIGHT[kind];
+    const confidence = sharedEvidence / (sharedEvidence + 12);
+    tasteSignal += weight * confidence * product / Math.sqrt(squaredA * squaredB);
+    weightSum += weight;
+  }
+  const profileSignal = weightSum ? tasteSignal / weightSum : 0;
+  const score = Math.round(50 + 50 * (0.45 * ratingSignal + 0.55 * profileSignal));
 
   return {
     score,
+    hasEvidence: ratingAgreement !== undefined || weightSum > 0,
     commonWatched: common.length,
     jaccard: common.length / Math.max(1, union),
     bothRated: pairs.length,
     correlation,
     meanAbsDiff,
+    ratingAgreement,
     genreSimilarity,
     agreements: pairs
       .filter((p) => p.a >= 4 && p.b >= 4)
@@ -438,6 +491,7 @@ export function buildDiscoveryPayload(
 
 export interface Recommendation {
   meta: FilmMeta;
+  detailsUnavailable: boolean;
   source: "watchlist" | "discover";
   inA: boolean;
   inB: boolean;
@@ -469,7 +523,8 @@ function rawScore(p: Profile, m: FilmMeta): RawScore {
     for (const c of arr) {
       // Tekil uç değerin tüm skoru patlatmasını önlemek için yumuşak doygunluk
       const bounded = Math.tanh(c.value / 1.4) * 1.4;
-      const v = (KIND_WEIGHT[kind] * bounded) / Math.sqrt(n);
+      const observationWeight = (c.stat.count / (c.stat.count + 2)) * (0.55 + 0.45 * c.stat.ratedCount / c.stat.count);
+      const v = (KIND_WEIGHT[kind] * bounded * observationWeight) / Math.sqrt(n);
       total += v;
       contribs.push({ ...c, value: v });
     }
@@ -512,6 +567,22 @@ function findFavoriteOverlap(p: Profile, m: FilmMeta): { name: string; rating?: 
 const toMatchPct = (raw: number) => Math.round(100 / (1 + Math.exp(-raw * 0.72)));
 const fmtStar = (r?: number) => (r ? `${r.toFixed(1)}★` : "");
 
+function basicFilmMeta(ref: FilmRef): FilmMeta {
+  const search = "https://letterboxd.com/search/films/" + encodeURIComponent(ref.name) + "/";
+  return {
+    key: ref.key,
+    slug: ref.slug ?? "",
+    name: ref.name,
+    year: ref.year,
+    url: ref.slug ? "https://letterboxd.com/film/" + encodeURIComponent(ref.slug) + "/"
+      : ref.uri && /^https:\/\/(?:boxd\.it|letterboxd\.com)\//i.test(ref.uri) ? ref.uri : search,
+    directors: [],
+    actors: [],
+    genres: [],
+    countries: [],
+  };
+}
+
 export function recommend(
   candidates: Candidate[],
   metas: Map<string, FilmMeta>,
@@ -520,11 +591,13 @@ export function recommend(
 ): Recommendation[] {
   const dedup = new Map<string, Candidate>();
   for (const c of candidates) {
-    const existing = dedup.get(c.ref.key);
-    if (!existing) dedup.set(c.ref.key, c);
+    const tmdbId = metas.get(c.ref.key)?.tmdbId;
+    const key = tmdbId ? "tmdb:" + tmdbId : c.ref.key;
+    const existing = dedup.get(key);
+    if (!existing) dedup.set(key, c);
     else {
       // Aynı film hem watchlist hem discover'daysa watchlist öncelikli kalsın, seedInfo birleşsin
-      dedup.set(c.ref.key, {
+      dedup.set(key, {
         ...existing,
         inA: existing.inA || c.inA,
         inB: existing.inB || c.inB,
@@ -536,8 +609,9 @@ export function recommend(
 
   const recs: Recommendation[] = [];
   for (const c of dedup.values()) {
-    const m = metas.get(c.ref.key);
-    if (!m) continue;
+    const details = metas.get(c.ref.key);
+    if (!details && c.source !== "watchlist") continue;
+    const m = details ?? basicFilmMeta(c.ref);
 
     const ra = rawScore(pa, m);
     const rb = rawScore(pb, m);
@@ -545,7 +619,9 @@ export function recommend(
     const matchB = toMatchPct(rb.total);
 
     // Ortak skor: ikisinin uyumu - aralarındaki dengesizlik cezası
-    let score = 0.5 * (matchA + matchB) - 0.35 * Math.abs(matchA - matchB);
+    const weakerMatch = Math.min(matchA, matchB);
+    const strongerMatch = Math.max(matchA, matchB);
+    let score = 0.75 * weakerMatch + 0.25 * strongerMatch;
     if (c.inA && c.inB) score += 12;
     else if (c.inA || c.inB) score += 3;
 
@@ -553,7 +629,9 @@ export function recommend(
     const hasBothSeed = c.seedInfo?.fromSeeds.some((s) => s.owner === "both");
     if (seedCount > 0) score += Math.min(11, seedCount * 3.5 + (hasBothSeed ? 3 : 0));
 
-    if (m.avgRating) score += (m.avgRating - 3.3) * 7;
+    const voteWeight = (m.voteCount ?? 0) / ((m.voteCount ?? 0) + 150);
+    if (m.avgRating) score += (m.avgRating - 3.3) * 4 * voteWeight;
+    if (weakerMatch < 45) score -= (45 - weakerMatch) * 0.4;
     score = Math.max(10, Math.min(99, Math.round(score)));
 
     const reasons: string[] = [];
@@ -583,7 +661,7 @@ export function recommend(
     for (const s of shared.slice(0, 2)) {
       const what = s.kind === "genre" ? "türü" : s.kind === "decade" ? "dönemi" : s.kind === "country" ? "sineması" : "";
       reasons.push(
-        s.kind === "director" || s.kind === "actor"
+        s.kind === "director" || s.kind === "actor" || s.kind === "language" || s.kind === "runtime"
           ? `İkinizin de sevdiği ${KIND_LABEL[s.kind].toLowerCase()}: ${s.name}`
           : `İkinizin de sevdiği ${s.name} ${what}`,
       );
@@ -614,14 +692,15 @@ export function recommend(
       if (worst) warnings.push(`${p.label} genelde ${worst.name}${worst.kind === "genre" ? " türünü" : " filmlerini"} pek sevmiyor`);
     }
 
-    if (m.avgRating && m.avgRating >= 3.85) {
+    if (m.avgRating && m.avgRating >= 3.85 && voteWeight >= 0.5) {
       reasons.push(`Ortalama puanı yüksek (${fmtStar(m.avgRating)})`);
     }
 
-    if (!reasons.length) reasons.push("Genel zevk profilinize dengeli uyum");
+    if (!reasons.length && details) reasons.push("Genel zevk profilinize dengeli uyum");
 
     recs.push({
       meta: m,
+      detailsUnavailable: !details,
       source: c.source,
       inA: c.inA,
       inB: c.inB,
@@ -633,7 +712,8 @@ export function recommend(
     });
   }
 
-  recs.sort((x, y) => y.score - x.score);
+  recs.sort((x, y) => y.score - x.score
+    || Math.min(y.matchA, y.matchB) - Math.min(x.matchA, x.matchB));
   return recs;
 }
 
@@ -642,7 +722,7 @@ export function profileSummary(p: Profile): string {
   const list = (k: FeatureKind) => p.top[k].slice(0, 5).map((s) => s.name).join(", ") || "-";
   return [
     `${p.label}: ${p.watchedCount} film izlemiş, ortalama puan ${p.avgRating?.toFixed(2) ?? "?"}.`,
-    `Sevdiği türler: ${list("genre")}. Sevdiği yönetmenler: ${list("director")}. Sevdiği oyuncular: ${list("actor")}. Dönemler: ${list("decade")}.`,
+    `Sevdiği türler: ${list("genre")}. Sevdiği yönetmenler: ${list("director")}. Sevdiği oyuncular: ${list("actor")}. Dönemler: ${list("decade")}. Diller: ${list("language")}. Süreler: ${list("runtime")}.`,
     `Pek sevmedikleri: ${p.disliked.map((s) => s.name).join(", ") || "-"}.`,
     `Favorilerinden bazıları: ${p.favorites.slice(0, 6).map((f) => `${f.meta.name} (${f.meta.year ?? ""})`).join(", ")}.`,
   ].join(" ");

@@ -24,7 +24,7 @@ async function tmdbGet<T>(endpoint: string, params: Record<string, string | numb
   const headers: Record<string, string> = { Accept: "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(url.toString(), { headers, cache: "no-store" });
+  const res = await fetch(url.toString(), { headers, cache: "no-store", signal: AbortSignal.timeout(8_000) });
   if (!res.ok) throw new Error(`TMDB ${res.status} döndü: ${endpoint}`);
   return res.json() as Promise<T>;
 }
@@ -47,6 +47,7 @@ interface TmdbMovieDetail {
   id: number;
   title: string;
   original_title: string;
+  original_language?: string;
   overview?: string;
   release_date?: string;
   runtime?: number | null;
@@ -139,6 +140,7 @@ export async function fetchTmdbMovieDetail(tmdbId: number, lookup?: Partial<Film
     slug: lookup?.slug || `tmdb-${detail.id}`,
     name: lookup?.name || detail.title || detail.original_title,
     originalName: detail.original_title,
+    originalLanguage: detail.original_language || undefined,
     year,
     tmdbId: detail.id,
     genreIds,
