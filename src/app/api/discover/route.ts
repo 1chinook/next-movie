@@ -1,7 +1,7 @@
 import { discoverFilms } from "@/lib/letterboxd";
 import { hasTmdbConfig, type DiscoverSeed } from "@/lib/tmdb";
 
-export const maxDuration = 60;
+export const maxDuration = 90;
 
 interface DiscoverBody {
   seeds?: DiscoverSeed[];
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
       genreIds: body.genreIds ?? [],
       excludeKeys: body.excludeKeys ?? [],
       excludeTmdbIds: body.excludeTmdbIds ?? [],
-      limit: 30,
+      limit: 72,
     });
     return Response.json({ ...res, enabled: true });
   } catch (e) {

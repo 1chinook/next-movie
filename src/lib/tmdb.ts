@@ -200,13 +200,13 @@ interface DiscoveryCandidate {
 }
 
 export function selectDiscoveryCandidates(candidates: DiscoveryCandidate[], limit: number) {
-  const quotas = [0.4, 0.3, 0.2];
+  const quotas = [0.7, 0.2, 0.1];
+  const groups = AUDIENCES.map(({ id }) => candidates.filter((movie) => audienceOf(movie.voteCount) === id));
   const batch = new Map<number, DiscoveryCandidate>();
-  for (const [index, { id }] of AUDIENCES.entries()) {
-    const matches = candidates.filter((movie) => audienceOf(movie.voteCount) === id);
-    for (const movie of matches.slice(0, Math.floor(limit * quotas[index]))) batch.set(movie.tmdbId, movie);
+  for (const [index, group] of groups.entries()) {
+    for (const movie of group.slice(0, Math.floor(limit * quotas[index]))) batch.set(movie.tmdbId, movie);
   }
-  for (const movie of candidates) {
+  for (const movie of [...groups.flat(), ...candidates]) {
     if (batch.size >= limit) break;
     batch.set(movie.tmdbId, movie);
   }
@@ -219,7 +219,17 @@ export async function collectDiscoveryIds(
   excludeKeys: Set<string>,
   excludeTmdbIds: Set<number>,
 ): Promise<DiscoveryCandidate[]> {
-  const pool = new Map<number, { item: TmdbMovieSummary; fromSeeds: SeedHitInfo["fromSeeds"]; rank: number }>();
+  const pool = new Map<number, {
+    item: TmdbMovieSummary;
+    fromSeeds: SeedHitInfo["fromSeeds"];
+    seedRank: number;
+    discoveryRank: number;
+  }>();
+  const entryFor = (item: TmdbMovieSummary) => {
+    const entry = pool.get(item.id) ?? { item, fromSeeds: [], seedRank: 0, discoveryRank: 0 };
+    pool.set(item.id, entry);
+    return entry;
+  };
 
   const isExcluded = (m: TmdbMovieSummary) => {
     if (excludeTmdbIds.has(m.id)) return true;
@@ -235,20 +245,19 @@ export async function collectDiscoveryIds(
   };
 
   // 1. Favori filmlerden TMDB recommendations
-  await Promise.all(
+  const seedQueries = Promise.all(
     seeds.slice(0, 12).map(async (seed) => {
       try {
         const res = await tmdbGet<TmdbListResponse>(`/movie/${seed.tmdbId}/recommendations`, { language: "en-US", page: 1 });
         for (const [idx, m] of res.results.slice(0, 14).entries()) {
           if ((m.vote_count ?? 0) < 120 || (m.vote_average ?? 0) < 6.4) continue;
           if (isExcluded(m)) continue;
-          const entry = pool.get(m.id) ?? { item: m, fromSeeds: [], rank: 0 };
+          const entry = entryFor(m);
           if (!entry.fromSeeds.some((s) => s.name === seed.name)) {
             entry.fromSeeds.push({ name: seed.name, owner: seed.owner });
           }
           const ownerBonus = seed.owner === "both" ? 5 : 3.5;
-          entry.rank += ownerBonus + Math.max(0, 14 - idx) * 0.15 + ((m.vote_average ?? 6.5) - 6.5) * 0.4;
-          pool.set(m.id, entry);
+          entry.seedRank = Math.max(entry.seedRank, ownerBonus + Math.max(0, 14 - idx) * 0.15);
         }
       } catch {
         /* Tekil seed hatasını yoksay */
@@ -260,25 +269,35 @@ export async function collectDiscoveryIds(
   const withGenres = genreIds.slice(0, 4).join("|");
   const withoutGenres = genreIds.includes(99) ? "10770" : "99,10770";
 
-  const audienceQueries = await Promise.all(
-    AUDIENCES.map(async (audience) => {
+  const queryPlans = AUDIENCES.flatMap((audience) => {
+    const pages = audience.id === "popular" ? 4 : audience.id === "medium" ? 3 : 2;
+    const sortBy = audience.id === "popular" ? "vote_count.desc" : "popularity.desc";
+    return Array.from({ length: pages }, (_, index) => ({ audience, genres: withGenres, sortBy, page: index + 1 }));
+  });
+  for (const page of [1, 2, 3]) {
+    queryPlans.push({ audience: AUDIENCES[0], genres: "", sortBy: "popularity.desc", page });
+    if (withGenres) queryPlans.push({ audience: AUDIENCES[0], genres: "", sortBy: "vote_count.desc", page });
+  }
+
+  const audienceQueries = Promise.all(
+    queryPlans.map(async ({ audience, genres, sortBy, page }) => {
       try {
         const res = await tmdbGet<TmdbListResponse>("/discover/movie", {
-          with_genres: withGenres,
+          with_genres: genres,
           without_genres: withoutGenres,
-          sort_by: audience.id === "popular" ? "vote_count.desc" : "vote_average.desc",
+          sort_by: sortBy,
           "vote_count.gte": Math.max(audience.min, 50),
           "vote_count.lte": "max" in audience ? audience.max : undefined,
           "vote_average.gte": 6.8,
           include_adult: "false",
           language: "en-US",
-          page: 1,
+          page,
         });
         for (const m of res.results) {
           if (isExcluded(m)) continue;
-          const entry = pool.get(m.id) ?? { item: m, fromSeeds: [], rank: 0 };
-          entry.rank += 2 + ((m.vote_average ?? 7) - 7) * 0.5;
-          pool.set(m.id, entry);
+          const entry = entryFor(m);
+          const discoveryRank = 2 + Number(Boolean(genres)) * 2 + ((m.vote_average ?? 7) - 7) * 0.8;
+          entry.discoveryRank = Math.max(entry.discoveryRank, discoveryRank);
         }
         return true;
       } catch {
@@ -286,7 +305,8 @@ export async function collectDiscoveryIds(
       }
     }),
   );
-  if (!pool.size && audienceQueries.every((succeeded) => !succeeded)) {
+  const [, queryResults] = await Promise.all([seedQueries, audienceQueries]);
+  if (!pool.size && queryResults.every((succeeded) => !succeeded)) {
     throw new Error("TMDB keşif verileri alınamadı.");
   }
 
@@ -299,7 +319,8 @@ export async function collectDiscoveryIds(
         key: filmKey(e.item.title || e.item.original_title, year),
         name: e.item.title || e.item.original_title,
         year,
-        rank: e.rank + 3 * audienceReach(e.item.vote_count),
+        rank: e.seedRank + e.discoveryRank + Math.min(2, Math.max(0, e.fromSeeds.length - 1))
+          + 5 * audienceReach(e.item.vote_count),
         voteCount: e.item.vote_count,
       };
     })

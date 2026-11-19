@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { AUDIENCES, MOODS, audienceOf, moodsFor, type Audience, type Mood } from "@/lib/moviePreferences";
-import { orderRecommendations, SORTS, type RecommendationSort } from "@/lib/recommendationOrder";
+import { orderRecommendations, RECOMMENDATION_PAGE_SIZE, SORTS, type RecommendationSort } from "@/lib/recommendationOrder";
 import type { Compatibility, FeatureKind, Profile, Recommendation } from "@/lib/analysis";
 import { KIND_LABEL } from "@/lib/analysis";
 
@@ -272,7 +272,7 @@ export function Recommendations({
   onAskAi: (visible: Recommendation[]) => void;
   onWatched: (meta: Recommendation["meta"]) => void;
 }) {
-  const [shown, setShown] = useState(12);
+  const [shown, setShown] = useState(RECOMMENDATION_PAGE_SIZE);
   const initialFields = { runtime: "", genre: "", year: "", language: "", country: "", rating: "" };
   const [fields, setFields] = useState(initialFields);
   const [mood, setMood] = useState<Mood | "">("");
@@ -323,7 +323,7 @@ export function Recommendations({
   ];
   const changeFilter = (key: keyof typeof fields, value: string) => {
     setFields((previous) => ({ ...previous, [key]: value }));
-    setShown(12);
+    setShown(RECOMMENDATION_PAGE_SIZE);
   };
   const clearFilters = () => {
     setFields(initialFields);
@@ -331,7 +331,7 @@ export function Recommendations({
     setAudience("");
     setFilter("all");
     setSort("balanced");
-    setShown(12);
+    setShown(RECOMMENDATION_PAGE_SIZE);
   };
   const hasMetadataFilters = Object.values(fields).some(Boolean);
   const inputClass = "min-w-0 w-full rounded-lg border border-line bg-panel-2 px-3 py-2 text-foreground";
@@ -365,7 +365,7 @@ export function Recommendations({
                 key={id}
                 type="button"
                 aria-pressed={mood === id}
-                onClick={() => { setMood(id); setShown(12); }}
+                onClick={() => { setMood(id); setShown(RECOMMENDATION_PAGE_SIZE); }}
                 className={`rounded-full border px-3 py-2 text-sm ${mood === id ? "border-lbgreen bg-lbgreen/15 text-lbgreen" : "border-line text-muted hover:text-white"}`}
               >
                 {label}
@@ -377,7 +377,7 @@ export function Recommendations({
         <div className="grid gap-3 sm:grid-cols-3">
           <label className="grid gap-1 text-sm text-muted">
             Popülerlik
-            <select className={inputClass} value={audience} onChange={(event) => { setAudience(event.target.value as Audience | ""); setShown(12); }}>
+            <select className={inputClass} value={audience} onChange={(event) => { setAudience(event.target.value as Audience | ""); setShown(RECOMMENDATION_PAGE_SIZE); }}>
               <option value="">Tüm filmler</option>
               {AUDIENCES.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
             </select>
@@ -395,7 +395,7 @@ export function Recommendations({
           </label>
           <label className="grid gap-1 text-sm text-muted">
             Sıralama
-            <select className={inputClass} value={sort} onChange={(event) => { setSort(event.target.value as RecommendationSort); setShown(12); }}>
+            <select className={inputClass} value={sort} onChange={(event) => { setSort(event.target.value as RecommendationSort); setShown(RECOMMENDATION_PAGE_SIZE); }}>
               {SORTS.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
             </select>
           </label>
@@ -441,7 +441,7 @@ export function Recommendations({
             aria-pressed={filter === k}
             onClick={() => {
               setFilter(k);
-              setShown(12);
+              setShown(RECOMMENDATION_PAGE_SIZE);
             }}
             className={`rounded-full border px-3 py-1.5 ${
               filter === k ? "border-lbgreen bg-lbgreen/15 font-semibold text-lbgreen" : "border-line text-muted hover:text-foreground"
@@ -566,7 +566,7 @@ export function Recommendations({
         })}
       </div>
       {shown < ordered.length && (
-        <button onClick={() => setShown((s) => s + 10)} className="self-center rounded-lg border border-line px-4 py-2 text-sm hover:bg-panel-2">
+        <button onClick={() => setShown((s) => s + RECOMMENDATION_PAGE_SIZE)} className="self-center rounded-lg border border-line px-4 py-2 text-sm hover:bg-panel-2">
           Daha fazla göster ({ordered.length - shown})
         </button>
       )}

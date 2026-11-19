@@ -255,7 +255,7 @@ export async function discoverFilms(params: {
   const picked = selectDiscoveryCandidates(candidates, params.limit ?? 30);
   const seedMap: Record<string, SeedHitInfo> = {};
 
-  const films = await mapLimit(picked, 4, async (cand): Promise<FilmMeta | null> => {
+  const films = await mapLimit(picked, 10, async (cand): Promise<FilmMeta | null> => {
     const tmdbKey = `tmdb-v2:${cand.key}`;
     const byIdKey = `tmdbid-v2:${cand.tmdbId}`;
     const cached = c.get(byIdKey) ?? c.get(tmdbKey)
@@ -275,5 +275,7 @@ export async function discoverFilms(params: {
     return { ...meta, key: cand.key, name: cand.name, year: cand.year ?? meta.year };
   });
 
-  return { films: films.filter((m): m is FilmMeta => Boolean(m)), seedMap };
+  const available = films.filter((m): m is FilmMeta => Boolean(m));
+  if (picked.length && !available.length) throw new Error("TMDB film detayları alınamadı.");
+  return { films: available, seedMap };
 }

@@ -289,6 +289,11 @@ export default function Home() {
       const profiles = analyzeProfiles([a, b], metas, readHistory(key));
       const discoveries: Candidate[] = [];
       const discPayload = buildDiscoveryPayload(profiles.a, profiles.b, profiles.pa, profiles.pb, profiles.compat, profiles.metadata);
+      for (const { ref } of candidates) {
+        discPayload.excludeKeys.push(ref.key);
+        const tmdbId = profiles.metadata.get(ref.key)?.tmdbId;
+        if (tmdbId) discPayload.excludeTmdbIds.push(tmdbId);
+      }
       setStep("Yeni filmler keşfediliyor…");
       setProgress(0.9);
       try {
@@ -298,7 +303,10 @@ export default function Home() {
           body: JSON.stringify(discPayload),
         });
         if (!dRes.ok) throw new Error("Keşif isteği başarısız.");
-        const dData = (await dRes.json()) as { films?: FilmMeta[]; seedMap?: Record<string, SeedHitInfo> };
+        const dData = (await dRes.json()) as { films?: FilmMeta[]; seedMap?: Record<string, SeedHitInfo>; enabled?: boolean };
+        if (dData.enabled === false) {
+          warning = [warning, "Yeni film keşfi için TMDB bağlantısı gerekli. İzleme listelerinizden öneriler gösteriliyor."].filter(Boolean).join(" ");
+        }
         for (const m of dData.films ?? []) {
           if (!metas.has(m.key)) metas.set(m.key, m);
           discoveries.push({
